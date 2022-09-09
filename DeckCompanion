@@ -55,7 +55,8 @@ def collect_proton_paths():
     with open(libraryfolders_vdf) as json_file:
         data = vdf.load(json_file)
         for folder in data["libraryfolders"]:
-            lib_folder = str(data["libraryfolders"][folder]["path"]) + "/steamapps/common"
+            lib_folder = str(data["libraryfolders"][folder]
+                             ["path"]) + "/steamapps/common"
             logging.info("found: " + lib_folder)
             steam_lib_folders.append(lib_folder)
 
@@ -130,6 +131,18 @@ def run_game(proton_folder):
 if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p',
                         filename='/tmp/DeckCompanion.log', encoding='utf-8', level=logging.DEBUG)
+
+    try:
+        logging.info("updating from git...")
+        logpipe = LogPipe(logging.INFO)
+        with subprocess.Popen(["/usr/bin/git", "pull", "origin", "main"], env=proton_env, stdout=logpipe, stderr=logpipe) as s:
+            logpipe.close()
+    except:
+        logging.error(traceback.format_exc())
+        exit(-1)
+    except:
+        logging.error(traceback.format_exc())
+
     try:
         logging.info("current game: " + str(config.GAME_ID))
         if config.GAME_ID is None:
