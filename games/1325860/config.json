@@ -1,0 +1,9 @@
+{
+    "proton-version": "proton_tkg_makepkg",
+    "fix-scripts": [
+        {
+            "order": 1,
+            "path": "script.sh"
+        }
+    ]
+}

@@ -1,0 +1,6 @@
+"manifest"
+{
+  "version" "2"
+  "commandline" "/DeckCompanion %verb%"
+  "use_sessions" "1"
+}

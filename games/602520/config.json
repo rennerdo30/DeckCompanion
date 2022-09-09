@@ -1,0 +1,9 @@
+{
+    "proton-version": "",
+    "fix-scripts": [
+        {
+            "order": 1,
+            "path": "script.sh"
+        }
+    ]
+}

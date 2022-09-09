@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+import json
+import os
+import logging
+from glob import glob
+import subprocess
+import sys
+import threading
+import traceback
+import config
+import vdf
+
+
+class LogPipe(threading.Thread):
+
+    def __init__(self, level):
+        """Setup the object with a logger and a loglevel
+        and start the thread
+        """
+        threading.Thread.__init__(self)
+        self.daemon = False
+        self.level = level
+        self.fdRead, self.fdWrite = os.pipe()
+        self.pipeReader = os.fdopen(self.fdRead)
+        self.start()
+
+    def fileno(self):
+        """Return the write file descriptor of the pipe
+        """
+        return self.fdWrite
+
+    def run(self):
+        """Run the thread, logging everything.
+        """
+        for line in iter(self.pipeReader.readline, ''):
+            logging.log(self.level, line.strip('\n'))
+
+        self.pipeReader.close()
+
+    def close(self):
+        """Close the write end of the pipe.
+        """
+        os.close(self.fdWrite)
+
+
+def collect_proton_paths():
+    custom_proton_install_dir = os.path.abspath(
+        os.getenv("STEAM_COMPAT_CLIENT_INSTALL_PATH") + "/compatibilitytools.d")
+    logging.debug("custom_proton_install_dir=" + custom_proton_install_dir)
+
+    steam_lib_folders = []
+    libraryfolders_vdf = os.path.abspath(os.getenv(
+        "STEAM_COMPAT_CLIENT_INSTALL_PATH") + "/steamapps/libraryfolders.vdf")
+    logging.debug("libraryfolders_vdf=" + libraryfolders_vdf)
+    with open(libraryfolders_vdf) as json_file:
+        data = vdf.load(json_file)
+        for folder in data["libraryfolders"]:
+            lib_folder = str(data["libraryfolders"][folder]["path"]) + "/steamapps/common"
+            logging.info("found: " + lib_folder)
+            steam_lib_folders.append(lib_folder)
+
+    proton_paths = []
+    proton_paths.append(os.path.abspath(custom_proton_install_dir))
+    for folder in steam_lib_folders:
+        if os.path.isdir((folder)):
+            proton_paths.append(os.path.abspath(folder))
+
+    logging.info(proton_paths)
+    return proton_paths
+
+
+def find_folder(base, name):
+    for filename in glob(base + "/" + name, recursive=False):
+        logging.info(filename)
+        return filename
+    return None
+
+
+def find_proton(version):
+    logging.info("searching for proton installations...")
+    proton_folder = None
+    for path in collect_proton_paths():
+        logging.info("current path: '" + path + "'")
+        proton_folder = find_folder(path, version)
+        if proton_folder is not None:
+            proton_folder = os.path.abspath(proton_folder)
+            break
+
+    if proton_folder is None:
+        logging.info("could not find proton folder...")
+        return None
+    logging.info("found proton '" + version + "' in '" + proton_folder + "'")
+    return proton_folder
+
+
+def run_game(proton_folder):
+    logging.info("starting game...")
+    args = []
+    args.append(proton_folder + "/proton")
+    for arg in sys.argv:
+        if "DeckCompanion" in arg:
+            continue
+            args.append(proton_folder)
+        else:
+            args.append(str(arg))
+
+    proton_env = os.environ.copy()
+    proton_env["PROTON_LOG"] = 1
+    proton_env["STEAM_COMPAT_TOOL_PATHS"] = proton_folder
+
+    logging.info("used arguments:")
+    for arg in args:
+        logging.info(arg)
+
+    logging.info("used env:")
+    for env in proton_env:
+        proton_env[env] = str(proton_env[env])
+        logging.info(env + "=" + str(proton_env[env]))
+
+    try:
+        logpipe = LogPipe(logging.INFO)
+        with subprocess.Popen(args, env=proton_env, stdout=logpipe, stderr=logpipe) as s:
+            logpipe.close()
+    except:
+        logging.error(traceback.format_exc())
+        exit(-1)
+    logging.info("after game run")
+
+
+if __name__ == '__main__':
+    logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p',
+                        filename='/tmp/DeckCompanion.log', encoding='utf-8', level=logging.DEBUG)
+    try:
+        logging.info("current game: " + str(config.GAME_ID))
+        if config.GAME_ID is None:
+            logging.info("no game found! exiting...")
+            exit(-1)
+
+        collect_proton_paths()
+
+        logging.info("game config path: " + config.GAME_CONFIG_PATH)
+
+        with open(config.GAME_CONFIG_PATH) as json_file:
+            data = json.load(json_file)
+            proton_version = data['proton-version']
+            logging.info("proton version from config: '" +
+                         proton_version + "'")
+            proton = find_proton(proton_version)
+            run_game(proton)
+
+    except:
+        logging.error(traceback.format_exc())
+        exit(-1)
