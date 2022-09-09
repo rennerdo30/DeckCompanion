@@ -135,11 +135,8 @@ if __name__ == '__main__':
     try:
         logging.info("updating from git...")
         logpipe = LogPipe(logging.INFO)
-        with subprocess.Popen(["/usr/bin/git", "pull", "origin", "main"], env=proton_env, stdout=logpipe, stderr=logpipe) as s:
+        with subprocess.Popen(["/usr/bin/git", "pull", "origin", "main"], stdout=logpipe, stderr=logpipe) as s:
             logpipe.close()
-    except:
-        logging.error(traceback.format_exc())
-        exit(-1)
     except:
         logging.error(traceback.format_exc())
 
