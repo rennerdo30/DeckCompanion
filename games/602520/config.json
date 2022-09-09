@@ -1,9 +1,17 @@
 {
-    "proton-version": "",
-    "fix-scripts": [
+    "proton-version": "Proton 7.0",
+    "scripts": [
         {
             "order": 1,
-            "path": "script.sh"
-        }
+            "path": "fix-permissions.sh"
+        },
+        {
+            "order": 2,
+            "path": "protontricks.sh"
+        },
+        {
+            "order": 3,
+            "path": "mf-install.sh"
+        }        
     ]
 }

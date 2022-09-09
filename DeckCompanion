@@ -106,7 +106,6 @@ def run_game(proton_folder):
             args.append(str(arg))
 
     proton_env = os.environ.copy()
-    proton_env["PROTON_LOG"] = 1
     proton_env["STEAM_COMPAT_TOOL_PATHS"] = proton_folder
 
     logging.info("used arguments:")
@@ -128,17 +127,56 @@ def run_game(proton_folder):
     logging.info("after game run")
 
 
-if __name__ == '__main__':
-    logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p',
-                        filename='/tmp/DeckCompanion.log', encoding='utf-8', level=logging.DEBUG)
-
+def update():
     try:
         logging.info("updating from git...")
         logpipe = LogPipe(logging.INFO)
         with subprocess.Popen(["/usr/bin/git", "pull", "origin", "main"], stdout=logpipe, stderr=logpipe, cwd=config.BASE_DIR) as s:
             logpipe.close()
+            s.wait()
     except:
         logging.error(traceback.format_exc())
+
+
+def run_scripts(proton, scripts):
+    scripts_sorted = sorted(scripts, key=lambda d: d['order']) 
+
+    for script in scripts_sorted:
+        logging.info(script)
+        try:
+            proton_env = os.environ.copy()
+            proton_env["STEAM_COMPAT_TOOL_PATHS"] = proton
+            proton_env["PROTON"] = proton
+            proton_env["WINEPREFIX"] = proton_env["STEAM_COMPAT_DATA_PATH"] + "/pfx"
+            proton_env["PATH"] = "/usr/lib/:/usr/lib32/:" + proton_env["PATH"]
+            proton_env["LD_LIBRARY_PATH"] = "/usr/lib/:/usr/lib32/:" + proton_env["LD_LIBRARY_PATH"]
+            
+            script_path = os.path.abspath(config.GAME_CONFIG_DIR + "/" + script['path'])
+            if not os.path.isfile(script_path):
+                logging.info("script '" + script_path + "' not found!")
+                continue
+        
+            
+            logging.info("running script '" + script_path + "'")
+            args = [ "/bin/bash" ]
+            args.append(script_path)
+
+            for env in proton_env:
+                proton_env[env] = str(proton_env[env])
+
+            logpipe = LogPipe(logging.INFO)
+            with subprocess.Popen(args, env=proton_env, stdout=logpipe, stderr=logpipe) as s:
+                logpipe.close()
+                s.wait()
+        except:
+            logging.error(traceback.format_exc())
+
+
+if __name__ == '__main__':
+    logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p',
+                        filename='/tmp/DeckCompanion.log', encoding='utf-8', level=logging.DEBUG)
+
+    #update()
 
     try:
         logging.info("current game: " + str(config.GAME_ID))
@@ -152,10 +190,16 @@ if __name__ == '__main__':
 
         with open(config.GAME_CONFIG_PATH) as json_file:
             data = json.load(json_file)
+            scripts = data['scripts']
             proton_version = data['proton-version']
             logging.info("proton version from config: '" +
                          proton_version + "'")
             proton = find_proton(proton_version)
+
+            logging.info("running scripts...")
+            run_scripts(proton, scripts)
+
+            logging.info("running game...")
             run_game(proton)
 
     except:
