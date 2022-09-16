@@ -97,16 +97,41 @@ def find_proton(version):
 def run_game(proton_folder):
     logging.info("starting game...")
     args = []
-    args.append(proton_folder + "/proton")
-    for arg in sys.argv:
-        if "DeckCompanion" in arg:
-            continue
-            args.append(proton_folder)
-        else:
-            args.append(str(arg))
+
+    if os.path.isfile("/usr/bin/gamescope"):
+        args.append("/usr/bin/gamescope")
+        args.append("--")
+
+    if os.path.isfile('/usr/bin/mangoapp') and False:
+        run_script = '/tmp/DeckCompanion_' + str(config.GAME_ID) + '_run.sh'
+        with open(run_script, 'w') as rsh:
+            rsh.write('#!/bin/sh\n')
+            rsh.write('"' + proton_folder + '/proton" ')
+            for arg in sys.argv:
+                if "DeckCompanion" in arg:
+                    continue
+                else:
+                    rsh.write('"' + str(arg) + '" ')
+
+            rsh.write(" &\n")
+            rsh.write("/usr/bin/mangoapp\n")
+
+            args.append(run_script)
+    else:
+        args.append(proton_folder + "/proton")
+        for arg in sys.argv:
+            if "DeckCompanion" in arg:
+                continue
+                args.append(proton_folder)
+            else:
+                args.append(str(arg))
+
 
     proton_env = os.environ.copy()
     proton_env["STEAM_COMPAT_TOOL_PATHS"] = proton_folder
+
+    if os.path.isfile("/usr/bin/gamescope"):
+        proton_env["_"] = "/usr/bin/gamescope"
 
     logging.info("used arguments:")
     for arg in args:
@@ -139,7 +164,7 @@ def update():
 
 
 def run_scripts(proton, scripts):
-    scripts_sorted = sorted(scripts, key=lambda d: d['order']) 
+    scripts_sorted = sorted(scripts, key=lambda d: d['order'])
 
     for script in scripts_sorted:
         logging.info(script)
@@ -149,16 +174,17 @@ def run_scripts(proton, scripts):
             proton_env["PROTON"] = proton
             proton_env["WINEPREFIX"] = proton_env["STEAM_COMPAT_DATA_PATH"] + "/pfx"
             proton_env["PATH"] = "/usr/lib/:/usr/lib32/:" + proton_env["PATH"]
-            proton_env["LD_LIBRARY_PATH"] = "/usr/lib/:/usr/lib32/:" + proton_env["LD_LIBRARY_PATH"]
-            
-            script_path = os.path.abspath(config.GAME_CONFIG_DIR + "/" + script['path'])
+            proton_env["LD_LIBRARY_PATH"] = "/usr/lib/:/usr/lib32/:" + \
+                proton_env["LD_LIBRARY_PATH"]
+
+            script_path = os.path.abspath(
+                config.GAME_CONFIG_DIR + "/" + script['path'])
             if not os.path.isfile(script_path):
                 logging.info("script '" + script_path + "' not found!")
                 continue
-        
-            
+
             logging.info("running script '" + script_path + "'")
-            args = [ "/bin/bash" ]
+            args = ["/bin/bash"]
             args.append(script_path)
 
             for env in proton_env:
@@ -176,7 +202,7 @@ if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p',
                         filename='/tmp/DeckCompanion.log', encoding='utf-8', level=logging.DEBUG)
 
-    #update()
+    # update()
 
     try:
         logging.info("current game: " + str(config.GAME_ID))
@@ -190,7 +216,9 @@ if __name__ == '__main__':
 
         with open(config.GAME_CONFIG_PATH) as json_file:
             data = json.load(json_file)
-            scripts = data['scripts']
+            scripts = []
+            if 'scripts' in data:
+                scripts = data['scripts']
             proton_version = data['proton-version']
             logging.info("proton version from config: '" +
                          proton_version + "'")
