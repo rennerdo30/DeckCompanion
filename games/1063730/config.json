@@ -1,0 +1,9 @@
+{
+    "proton-version": "Proton 7.0",
+    "scripts": [
+        {
+            "order": 1,
+            "path": "fix-eac.sh"
+        }      
+    ]
+}

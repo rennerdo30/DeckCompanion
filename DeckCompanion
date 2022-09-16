@@ -108,7 +108,7 @@ def run_game(game_config, proton_folder):
     logging.info("starting game...")
     args = []
 
-    if os.path.isfile("/usr/bin/gamescope"):
+    if os.path.isfile("/usr/bin/gamescope") and False:
         width, height = get_screen_res()
         logging.info("screen size: width=" + width + " height=" + height)
 
@@ -152,7 +152,7 @@ def run_game(game_config, proton_folder):
     proton_env = os.environ.copy()
     proton_env["STEAM_COMPAT_TOOL_PATHS"] = proton_folder
 
-    if os.path.isfile("/usr/bin/gamescope"):
+    if os.path.isfile("/usr/bin/gamescope") and False:
         proton_env["_"] = "/usr/bin/gamescope"
 
     if 'env' in game_config:
