@@ -11,6 +11,6 @@ Installation
 ---
 Open `Konsole` and enter the following command:
 ```bash
-cd /home/deck/.local/share/Steam/compatibilitytools.d/ && git clone https://github.com/Rennerdo30/DeckCompanion.git
+cd /home/$USER/.local/share/Steam/compatibilitytools.d/ && git clone https://github.com/rennerdo30/DeckCompanion.git
 ```
 Then restart Steam
