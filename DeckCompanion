@@ -94,7 +94,7 @@ def find_proton(version):
     return proton_folder
 
 
-def run_game(proton_folder):
+def run_game(game_config, proton_folder):
     logging.info("starting game...")
     args = []
 
@@ -133,6 +133,10 @@ def run_game(proton_folder):
     if os.path.isfile("/usr/bin/gamescope"):
         proton_env["_"] = "/usr/bin/gamescope"
 
+    if 'env' in game_config:
+        for entry in game_config['env']:
+            proton_env[entry] = str(game_config['env'][entry])        
+
     logging.info("used arguments:")
     for arg in args:
         logging.info(arg)
@@ -140,7 +144,7 @@ def run_game(proton_folder):
     logging.info("used env:")
     for env in proton_env:
         proton_env[env] = str(proton_env[env])
-        logging.info(env + "=" + str(proton_env[env]))
+        logging.info(env + "=" + str(proton_env[env]))            
 
     try:
         logpipe = LogPipe(logging.INFO)
@@ -228,7 +232,7 @@ if __name__ == '__main__':
             run_scripts(proton, scripts)
 
             logging.info("running game...")
-            run_game(proton)
+            run_game(data, proton)
 
     except:
         logging.error(traceback.format_exc())
