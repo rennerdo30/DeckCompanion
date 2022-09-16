@@ -1,5 +1,9 @@
 import os
 
+LOG_FILE = "/tmp/DeckCompanion.log"
+LOG_FORMAT = "%(asctime)s %(message)s"
+LOG_DATE_FORMAT = "%m/%d/%Y %I:%M:%S %p"
+
 USER = os.getenv("USER")
 BASE_DIR = os.getenv("STEAM_COMPAT_TOOL_PATHS")
 GAME_ID = os.getenv("SteamGameId")

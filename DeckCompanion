@@ -93,13 +93,36 @@ def find_proton(version):
     logging.info("found proton '" + version + "' in '" + proton_folder + "'")
     return proton_folder
 
+def get_screen_res():
+    cmd = ['xrandr']
+    cmd2 = ['grep', '*']
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    p2 = subprocess.Popen(cmd2, stdin=p.stdout, stdout=subprocess.PIPE)
+    p.stdout.close()
+    resolution_string, junk = p2.communicate()
+    resolution = str(resolution_string.split()[0].decode("utf-8"))
+    width, height = resolution.split('x')
+    return width, height
 
 def run_game(game_config, proton_folder):
     logging.info("starting game...")
     args = []
 
     if os.path.isfile("/usr/bin/gamescope"):
+        width, height = get_screen_res()
+        logging.info("screen size: width=" + width + " height=" + height)
+
         args.append("/usr/bin/gamescope")
+        #args.append("-e")
+        #args.append("-m")
+        args.append("-w")
+        args.append(width)
+        args.append("-h")
+        args.append(height)
+        args.append("-W")
+        args.append(width)
+        args.append("-H")
+        args.append(height)
         args.append("--")
 
     if os.path.isfile('/usr/bin/mangoapp') and False:
@@ -126,7 +149,6 @@ def run_game(game_config, proton_folder):
             else:
                 args.append(str(arg))
 
-
     proton_env = os.environ.copy()
     proton_env["STEAM_COMPAT_TOOL_PATHS"] = proton_folder
 
@@ -135,7 +157,7 @@ def run_game(game_config, proton_folder):
 
     if 'env' in game_config:
         for entry in game_config['env']:
-            proton_env[entry] = str(game_config['env'][entry])        
+            proton_env[entry] = str(game_config['env'][entry])
 
     logging.info("used arguments:")
     for arg in args:
@@ -144,7 +166,7 @@ def run_game(game_config, proton_folder):
     logging.info("used env:")
     for env in proton_env:
         proton_env[env] = str(proton_env[env])
-        logging.info(env + "=" + str(proton_env[env]))            
+        logging.info(env + "=" + str(proton_env[env]))
 
     try:
         logpipe = LogPipe(logging.INFO)
@@ -202,12 +224,7 @@ def run_scripts(proton, scripts):
             logging.error(traceback.format_exc())
 
 
-if __name__ == '__main__':
-    logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p',
-                        filename='/tmp/DeckCompanion.log', encoding='utf-8', level=logging.DEBUG)
-
-    # update()
-
+def run():
     try:
         logging.info("current game: " + str(config.GAME_ID))
         if config.GAME_ID is None:
@@ -234,6 +251,18 @@ if __name__ == '__main__':
             logging.info("running game...")
             run_game(data, proton)
 
+    except:
+        logging.error(traceback.format_exc())
+        exit(-1)
+
+
+if __name__ == '__main__':
+    os.remove(config.LOG_FILE)
+    logging.basicConfig(format=config.LOG_FORMAT, datefmt=config.LOG_DATE_FORMAT,
+                        filename=config.LOG_FILE, encoding='utf-8', level=logging.DEBUG)
+    try:
+        update()
+        run()
     except:
         logging.error(traceback.format_exc())
         exit(-1)
