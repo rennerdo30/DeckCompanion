@@ -1,0 +1,9 @@
+{
+    "proton-version": "Proton - Experimental",
+    "scripts": [
+        {
+            "order": 1,
+            "path": "protontricks.sh"
+        }     
+    ]
+}
