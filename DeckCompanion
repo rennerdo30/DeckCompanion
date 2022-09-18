@@ -257,7 +257,8 @@ def run():
 
 
 if __name__ == '__main__':
-    os.remove(config.LOG_FILE)
+    if os.path.isfile(config.LOG_FILE):
+        os.remove(config.LOG_FILE)
     logging.basicConfig(format=config.LOG_FORMAT, datefmt=config.LOG_DATE_FORMAT,
                         filename=config.LOG_FILE, encoding='utf-8', level=logging.DEBUG)
     try:
