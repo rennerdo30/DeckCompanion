@@ -59,8 +59,12 @@ def reconcile(paths, appid, recipe, prefix, game, preferences, budget, log):
             for path in set(old) | set(files):
                 if not any(path.resolve().is_relative_to(r) for r in allowed):
                     raise Error("unsafe_manifest", "Manifest file escaped its root")
-                if path.exists() and (path not in old or net.digest(path) != old[path]["sha256"]):
-                    raise Error("content_conflict", "Preserving an existing or user-modified mod file")
+                if not path.exists() or (path in old and net.digest(path) == old[path]["sha256"]):
+                    continue
+                # A byte-identical file the player installed by hand is adopted, not a conflict.
+                if path not in old and path in files and net.digest(path) == hashlib.sha256(files[path]).hexdigest():
+                    continue
+                raise Error("content_conflict", "Preserving an existing or user-modified mod file")
             originals = {p: p.read_bytes() if p.exists() else None for p in set(old) | set(files)}
             snapshot = dict(manifest["mods"])
             try:

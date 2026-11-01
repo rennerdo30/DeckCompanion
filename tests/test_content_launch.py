@@ -74,6 +74,16 @@ def test_zip_traversal_checksum_and_collision_rejected(paths, tmp_path, monkeypa
     assert target.read_bytes() == b"existing user mod"
 
 
+def test_identical_hand_installed_mod_is_adopted(paths, tmp_path):
+    prefix = tmp_path / "prefix"
+    (prefix / "pfx").mkdir(parents=True)
+    recipe = mod_recipe(paths, b"deck mode zip")
+    atomic(prefix / "pfx/mods/m.zip", b"deck mode zip")
+    result, log = reconcile(paths, recipe, prefix)
+    assert result == {"test-mod": "1"} and not log
+    assert read_json(paths.data / "manifests/42.json")["mods"]["test-mod"]["version"] == "1"
+
+
 def test_valid_zip_and_failure_restores_previous_manifest(paths, tmp_path, monkeypatch):
     prefix = tmp_path / "prefix"
     (prefix / "pfx").mkdir(parents=True)

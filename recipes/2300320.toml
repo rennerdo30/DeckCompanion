@@ -2,7 +2,7 @@ schema_version = 1
 appid = "2300320"
 name = "Farming Simulator 25"
 version = "1.0.0"
-notes = "Not verified on hardware. Index builder resolves Deck Mode to an immutable asset and SHA256. Prefix content is deferred until pfx exists."
+notes = "Installs Deck Mode: bigger menu text, handheld graphics presets and controller-first button hints. Tick Deck Mode in the mod selection when you load a savegame. On a fresh install the mod is added on the second launch."
 
 [runtime]
 proton = "GE-Proton11-11"
