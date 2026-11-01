@@ -100,10 +100,12 @@ def install(paths, source):
     from . import takeover
     takeover.reconcile(paths, data)
     steam.prune_pending(paths, data)
+    localfix.prune(installed_paths, data)
     save_state(paths, data)
     pending = steam.has_pending(data)
     return {"installed": True, "version": version, "shortcut_pending": bool(data.get("shortcut_pending")),
             "steam_changes_pending": pending,
+            "steam_change_reasons": steam.steam_change_reasons(paths, data),
             "restart_required": pending, "legacy_tool_preserved": legacy}
 
 

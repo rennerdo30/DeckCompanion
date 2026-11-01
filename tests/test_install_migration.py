@@ -29,7 +29,12 @@ def source(tmp_path, monkeypatch):
 def test_idempotent_install_queue_ui_and_uninstall_preserves_foreign_files(paths, source):
     atomic(source / "bin/deckcompanion-ui", b"fake UI binary")
     assert install.install(paths, source) == {"installed": True, "version": __version__, "shortcut_pending": True,
-        "restart_required": True, "legacy_tool_preserved": False, "steam_changes_pending": True}
+        "restart_required": True, "legacy_tool_preserved": False, "steam_changes_pending": True,
+        "steam_change_reasons": [
+            {"scope": "mapping", "appid": "0", "field": "config", "before": None, "after": ""},
+            {"scope": "mapping", "appid": "0", "field": "name", "before": None, "after": "DeckCompanion"},
+            {"scope": "mapping", "appid": "0", "field": "priority", "before": None, "after": "250"},
+            {"scope": "shortcut", "field": "entry", "before": None, "after": "DeckCompanion"}]}
     assert update.current(paths) == __version__
     cli_file = paths.data / "bin/deckcompanion"
     assert 'main(sys.argv[1:])' in cli_file.read_text()

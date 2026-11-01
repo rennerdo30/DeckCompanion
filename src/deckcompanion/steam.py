@@ -305,6 +305,10 @@ def shortcut_value(key, value):
             return int(value) & 0xffffffff
         except (TypeError, ValueError):
             return None
+    if key in ("icon", "LaunchOptions") and value is None:
+        return ""  # Steam may omit empty optional fields.
+    if key == "LaunchOptions":
+        return "" if value == '""' else value
     if key in ("Exe", "StartDir", "icon") and isinstance(value, str):
         if value.startswith('"') and value.endswith('"'):
             value = value[1:-1]
@@ -312,25 +316,75 @@ def shortcut_value(key, value):
     return value
 
 
+def shortcut_field(entry, key, default=None):
+    # Steam writes appname/exe even when the installer used AppName/Exe.
+    return next((v for k, v in entry.items() if k.lower() == key.lower()), default)
+
+
+def shortcut_owned(paths, entry):
+    exe, unsigned = shortcut_identity(paths)
+    return (shortcut_value("appid", shortcut_field(entry, "appid")) == unsigned or
+            (shortcut_field(entry, "AppName") == "DeckCompanion" and
+             shortcut_value("Exe", shortcut_field(entry, "Exe")) == shortcut_value("Exe", exe)))
+
+
+def shortcut_desired(paths):
+    exe, unsigned = shortcut_identity(paths)
+    icon = paths.data / "assets/icon.png"
+    return {"appid": unsigned - 0x100000000, "AppName": "DeckCompanion", "Exe": exe,
+            "StartDir": '"' + str(paths.data / "bin") + '"',
+            "icon": str(icon) if icon.is_file() else "", "LaunchOptions": ""}
+
+
+def shortcut_matches(paths, key, actual, expected):
+    before, after = shortcut_value(key, actual), shortcut_value(key, expected)
+    if before == after:
+        return True
+    if key == "icon" and before and after:
+        # Older installs used immutable version assets. Equal content needs no Steam
+        # write, but a missing old icon still needs repair. Only read our asset paths.
+        candidate = Path(before)
+        try:
+            relative = candidate.resolve().relative_to((paths.data / "versions").resolve())
+        except ValueError:
+            return False
+        if relative.parts[1:] in (("assets", "steam", "icon.png"),
+                                  ("assets", "logo", "deckcompanion-icon-256.png")):
+            from . import net
+            return candidate.is_file() and Path(after).is_file() and net.digest(candidate) == net.digest(Path(after))
+    return False
+
+
+def shortcut_reasons(paths, path):
+    doc = vdf.binary_loads(path.read_bytes()) if path.exists() else {"shortcuts": {}}
+    previous = next((e for e in doc.get("shortcuts", {}).values() if shortcut_owned(paths, e)), None)
+    if previous is None:
+        return [{"scope": "shortcut", "field": "entry", "before": None, "after": "DeckCompanion"}]
+    return [{"scope": "shortcut", "field": key, "before": shortcut_field(previous, key), "after": value}
+            for key, value in shortcut_desired(paths).items()
+            if not shortcut_matches(paths, key, shortcut_field(previous, key), value)]
+
+
 def shortcut_bytes(paths, path, remove=False):
     doc = vdf.binary_loads(path.read_bytes()) if path.exists() else {"shortcuts": {}}
     entries = list(doc.setdefault("shortcuts", {}).values())
-    exe, unsigned = shortcut_identity(paths)
-    ident = unsigned - 0x100000000  # Steam interprets the signed VDF int32 bits as uint32.
-    owned = lambda e: (shortcut_value("appid", e.get("appid")) == unsigned or
-                       (e.get("AppName") == "DeckCompanion" and
-                        shortcut_value("Exe", e.get("Exe")) == shortcut_value("Exe", exe)))
+    owned = lambda e: shortcut_owned(paths, e)
     previous = next((e for e in entries if owned(e)), None)
     if not remove:
-        icon = paths.data / "assets/icon.png"
-        desired = {"appid": ident, "AppName": "DeckCompanion", "Exe": exe,
-                        "StartDir": '"' + str(paths.data / "bin") + '"',
-                        "icon": str(icon) if icon.is_file() else "", "LaunchOptions": ""}
-        if previous and all(shortcut_value(k, previous.get(k)) == shortcut_value(k, value)
+        desired = shortcut_desired(paths)
+        if previous and all(shortcut_matches(paths, k, shortcut_field(previous, k), value)
                             for k, value in desired.items()):
             return path.read_bytes()  # Steam-added fields, order and player tags stay intact.
-        desired = dict(previous if previous is not None else {
-            "tags": {}, "IsHidden": 0, "AllowDesktopConfig": 1, "AllowOverlay": 1}, **desired)
+        updated = dict(previous if previous is not None else {
+            "tags": {}, "IsHidden": 0, "AllowDesktopConfig": 1, "AllowOverlay": 1})
+        for key, value in desired.items():
+            spellings = [k for k in updated if k.lower() == key.lower()]
+            if previous and len(spellings) <= 1 and shortcut_matches(paths, key, shortcut_field(previous, key), value):
+                continue
+            for spelling in spellings:
+                updated.pop(spelling)
+            updated[spellings[0] if spellings else key] = value
+        desired = updated
         entries = [desired if owned(e) else e for e in entries] if previous else [*entries, desired]
     else:
         entries = [e for e in entries if not owned(e)]
@@ -379,16 +433,67 @@ def prune_pending(paths, data):
             from . import localfix
             localfix.remove(paths, ident)
             game.update(enabled=False, pending=None)
+    prune_shortcut(paths, data)
+
+
+def prune_shortcut(paths, data):
+    """Recheck the UI queue without performing mapping/localfix side effects."""
     if data.get("shortcut_pending"):
         try:
             path = shortcut_path(paths)
-            from . import net
-            data["shortcut_pending"] = (differs(path, shortcut_bytes(paths, path)) or
-                any(not p.is_file() or net.digest(p) != hashlib.sha256(payload).hexdigest()
-                    for p, payload in shortcut_artwork(paths, path)))
+            data["shortcut_pending"] = bool(shortcut_reasons(paths, path) or artwork_reasons(paths, path))
         except Error as exc:
             if exc.code != "steam_user_required":
                 raise  # Leave the queue for apply to resolve an account choice.
+
+
+def artwork_reasons(paths, path):
+    from . import net
+    names = {suffix: name for name, suffix in ARTWORK.items()}
+    prefix = str(shortcut_identity(paths)[1])
+    result = []
+    for dest, payload in shortcut_artwork(paths, path):
+        before = net.digest(dest) if dest.is_file() else None
+        after = hashlib.sha256(payload).hexdigest()
+        if before != after:
+            result.append({"scope": "artwork", "field": names[dest.stem[len(prefix):]],
+                           "before": before, "after": after})
+    return result
+
+
+def steam_change_reasons(paths, data):
+    """Explain actual owned-field/content differences, independent of VDF bytes."""
+    result = []
+    target = mappings(read_vdf(mapping_path(paths)))
+    pending = [("0", data.get("default_pending"), data.get("previous_default_mapping"))]
+    pending += [(ident, g.get("pending"), g.get("previous_mapping")) for ident, g in data["games"].items()]
+    for ident, action, previous in pending:
+        if not action:
+            continue
+        actual = target.get(ident)
+        expected = {"name": "DeckCompanion", "config": "", "priority": "250"} if action in ("enable", "default_on") else previous
+        if action in ("disable", "default_off") and (actual or {}).get("name") != "DeckCompanion":
+            continue
+        for key in sorted(set(actual or {}) | set(expected or {})):
+            before, after = (actual or {}).get(key), (expected or {}).get(key)
+            equal = before == after
+            if key == "priority":
+                try:
+                    equal = int(before) == int(after)
+                except (TypeError, ValueError):
+                    pass
+            if not equal:
+                result.append({"scope": "mapping", "appid": ident, "field": key, "before": before, "after": after})
+    if data.get("shortcut_pending"):
+        try:
+            path = shortcut_path(paths)
+            result.extend(shortcut_reasons(paths, path))
+            result.extend(artwork_reasons(paths, path))
+        except Error as exc:
+            if exc.code != "steam_user_required":
+                raise
+            result.append({"scope": "shortcut", "field": "account", "error": exc.code})
+    return result
 
 
 def shortcut_artwork(paths, path):
@@ -434,6 +539,8 @@ def prepare_apply(paths):
     data = state(paths)
     from . import takeover
     takeover.reconcile(paths, data, uninstall=data.get("uninstalling", False))
+    prune_shortcut(paths, data)
+    reasons = steam_change_reasons(paths, data)
     doc = read_vdf(mapping_path(paths))
     target = mappings(doc)
     changes, cleanup = [], []
@@ -511,7 +618,8 @@ def prepare_apply(paths):
     originals = {p: p.read_bytes() if p.exists() else None for p, _ in writes}
     originals.update({p: p.read_bytes() for p in cleanup if p.exists()})
     return {"writes": writes, "originals": originals, "cleanup": cleanup, "data": data,
-            "changes": changes, "mappings": {str(c.get("appid", "0")): target.get(str(c.get("appid", "0")))
+            "changes": changes, "steam_change_reasons": reasons,
+            "mappings": {str(c.get("appid", "0")): target.get(str(c.get("appid", "0")))
                 for c in changes if c["action"] != "shortcut"},
             "shortcut": any(c["action"] == "shortcut" for c in changes)}
 

@@ -148,7 +148,7 @@ is intentionally long-lived.
 
 `~/.local/share/deckcompanion/logs/apply-last.json` (under `DECKCOMPANION_HOME` when
 overridden) records `pid`, `started_at`, `finished_at`, `game_mode`, `applied`,
-`steam_restarted`, `attempts`, `verified`, `errors` (code/message objects), and `timings`
+`steam_restarted`, `attempts`, `verified`, `steam_change_reasons`, `errors` (code/message objects), and `timings`
 (seconds for prepare and the last shutdown/apply/restore phases and total).
 An in-flight receipt has no `finished_at`;
 an interrupted or service-timeout run can leave that receipt for diagnosis. A second
@@ -587,7 +587,7 @@ is an error. See [updates.md](updates.md) for integrity, cache and signing limit
 ## Installer commands (slice 3)
 
 `install [--source EXTRACTED_RELEASE] --json` ->
-`{"installed":true,"version":"0.3.2","shortcut_pending":true,"steam_changes_pending":true,"restart_required":true,"legacy_tool_preserved":false}`.
+`{"installed":true,"version":"0.3.2","shortcut_pending":true,"steam_changes_pending":true,"restart_required":true,"legacy_tool_preserved":false,"steam_change_reasons":[{"scope":"shortcut","field":"LaunchOptions","before":"--old","after":""}]}`.
 Engine versions, compat tool, bin stubs and UI/assets install while Steam is running.
 Only Steam VDF writes (shortcut and queued mappings) wait for `apply` with Steam closed.
 `steam_changes_pending` includes default/game mappings and the shortcut. Install
@@ -595,11 +595,29 @@ queues the global default only when its managed mapping differs. Shortcut entrie
 artwork bytes and queued per-game mappings are compared against Steam's current disk
 state; matching writes are dropped. Steam-added shortcut properties, ordering and
 player tags are preserved. Apply also skips files with identical bytes.
+Shortcut keys compare without case sensitivity (`appname`/`exe` are Steam's usual
+spelling); omitted empty icon/launch options, quoted paths, int32 appids and
+renumbered entries are equivalent. The UI executable remains the stable
+`bin/deckcompanion-ui` stub. An existing icon under our immutable version assets
+is equivalent to the stable icon only while its file exists and its SHA256 matches.
+An older icon with changed content or a missing file is repaired on apply.
+`steam_change_reasons` names each differing owned field with `scope` (`mapping`,
+`shortcut` or `artwork`), `field`, `before` and `after`. Mapping reasons also carry
+`appid`; artwork values are SHA256 hashes (null when missing). Missing shortcuts
+report `field: "entry"`; an unresolved account reports `field: "account"` and its
+error code. The detached helper records the same diagnostic in `apply-last.json`
+before shutdown; a queued shortcut that now matches is cleared without a restart.
 An engine-only update with matching Steam files returns
-`{"installed":true,"version":"0.3.2","shortcut_pending":false,"steam_changes_pending":false,"restart_required":false,"legacy_tool_preserved":false}`.
+`{"installed":true,"version":"0.3.2","shortcut_pending":false,"steam_changes_pending":false,"restart_required":false,"legacy_tool_preserved":false,"steam_change_reasons":[]}`.
 It needs no apply/restart; the installer's unconditional empty-queue apply is harmless.
 Installs no packages and changes no
 persistent environment.
+Install also removes obsolete localfixes bearing the leading
+`# managed-by: DeckCompanion` marker: native ELF/script shortcuts, known Linux
+Steam installations, our UI/umu shortcut appids, and apps with neither enabled
+(or pending-enable) state nor a recipe. Foreign localfixes are left byte-for-byte
+intact. Enabled games and recipe-backed fixes remain unless they are native or
+our own shortcuts.
 The source defaults to the current engine/checkout root. UI shortcut is queued
 only if the release contains `bin/deckcompanion-ui`. `apply` chooses the Steam user.
 `assets/steam/icon.png` (or the legacy `assets/logo/deckcompanion-icon-256.png`)
