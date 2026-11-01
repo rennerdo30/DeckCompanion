@@ -353,6 +353,18 @@ func settings_checks(ui: Node) -> void:
 	ui._show_license(true)
 	check(ui.licenses.get_child(0).get_child(0).text.contains("Rossen Georgiev") and ui.licenses.get_child(0).get_child(0).text.contains("Godot Engine"),"third-party dialog contains bundled and Godot notices")
 	ui.licenses.hide()
+	# Restore all (owner 2026-11-01): visible while a takeover snapshot exists, confirmed first.
+	ui._switch_tab(2)
+	ui._request("status")
+	await create_timer(0.25).timeout
+	check(control(ui,"restore_all") != null,"Settings offers Restore all while a takeover snapshot exists")
+	if control(ui,"restore_all") != null:
+		control(ui,"restore_all").pressed.emit()
+		check(ui.restore_dialog.visible,"Restore all asks for confirmation first")
+		ui.restore_dialog.hide()
+	ui._request("restore-all")
+	await create_timer(0.7).timeout
+	check(ui.notice.contains("Restoring 6 games") and control(ui,"restore_all") == null and not ui.settings.get("takeover_all",true),"restore turns takeover off, queues restores and hides the button")
 	ui._switch_tab(1)
 	check(control(ui,"default") == null and control(ui,"splash_toggle") == null,"Updates keeps status and its own update check, no settings toggles")
 	var other: Node = load("res://main.tscn").instantiate()

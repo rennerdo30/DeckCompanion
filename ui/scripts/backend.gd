@@ -5,11 +5,13 @@ var scenario := ""
 var busy := false
 var games: Array = []
 var default_tool := false
+var takeover_snapshot: Variant = {"taken_at":"2026-11-01T13:31:00+00:00","games":6}
+var restore_pending := false
 var default_pending = null
 var removed_pending: Array = []
 var worker: Thread
 var active := ""
-var settings := {"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true,"auto_install_ge":true,"cleanup_old_ge":true}
+var settings := {"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true,"auto_install_ge":true,"cleanup_old_ge":true,"splash_parallel":false,"takeover_all":true}
 var proton_builds: Array = [{"name":"GE-Proton11-11","state":"wanted","installed":false,"wanted_by":["Farming Simulator 25"],"latest":true}]
 var proton_ticks := 0
 
@@ -68,6 +70,7 @@ static func parse_response(raw: String, exit_code: int, command: String) -> Dict
 					if not build is Dictionary or not build.get("name") is String or not build.get("path") is String: valid = false
 		"update": valid = data.get("scheduled",false) or (data.get("engine") is Dictionary and data.get("index") is Dictionary and data.engine.get("current") is String and data.engine.get("available") is String and (data.index.get("fetched_at") is String or data.index.get("fetched_at") == null))
 		"apply": valid = data.get("applied") is Array and data.get("steam_restarted") is bool
+		"restore-all": valid = (data.get("restoring") is int or data.get("restoring") is float) and data.get("pending") is Array
 		"add-game": valid = valid_game(data) and data.get("kind") == "non_steam" and data.get("slug") is String
 		"remove-game": valid = data.get("removed") == true and data.get("prefix_preserved") == true
 	return data if valid else failure("INVALID_RESPONSE", "The engine response is missing required fields. Please update the engine and UI together.")
@@ -177,6 +180,12 @@ func mock_response(command: String, args: Array = []) -> Dictionary:
 	if scenario == "offline" and command == "update": return fixture("offline")
 	if command == "games": return {"games": [] if scenario == "empty" else games.duplicate(true)}
 	if command == "update": return fixture("update")
+	if command == "restore-all":
+		var count: int = int(takeover_snapshot.get("games",0)) if takeover_snapshot is Dictionary else 0
+		settings.takeover_all = false
+		takeover_snapshot = null
+		restore_pending = count > 0
+		return {"restoring": count, "pending": [{"action":"restore"}] if count > 0 else []}
 	if command == "game-option":
 		for game in games:
 			if args.is_empty() or game.appid != args[0]: continue
@@ -195,10 +204,13 @@ func mock_response(command: String, args: Array = []) -> Dictionary:
 		result.pending += games.filter(func(g): return g.get("shortcut_pending") != null).map(func(g): return {"slug":g.slug}) + removed_pending
 		if default_pending != null: result.pending.append({"action": default_pending})
 		result.default_tool = default_tool
+		result.takeover_snapshot = takeover_snapshot
+		if restore_pending: result.pending.append({"action":"restore"})
 		result.install_path = "/home/deck/.local/share/deckcompanion"
 		return result
 	if command == "apply":
 		var applied: Array = []
+		restore_pending = false
 		applied.append_array(removed_pending)
 		removed_pending.clear()
 		for game in games:

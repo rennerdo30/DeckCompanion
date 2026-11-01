@@ -9,6 +9,7 @@ const DragScroll = preload("res://scripts/drag_scroll.gd")
 const AddGame = preload("res://scripts/add_game.gd")
 var add_flow: RefCounted
 var remove_dialog: ConfirmationDialog
+var restore_dialog: ConfirmationDialog
 const UI_VERSION := "0.4.2"
 # Design tokens (shared with the logo and Steam artwork palette).
 const INK := Color("e7f1f4")
@@ -299,6 +300,16 @@ func _build_shell() -> void:
 	licenses.confirmed.connect(_restore_modal_focus)
 	licenses.canceled.connect(_restore_modal_focus)
 	add_child(licenses)
+	restore_dialog = ConfirmationDialog.new()
+	restore_dialog.title = "Restore previous Steam settings?"
+	restore_dialog.dialog_text = "Every game goes back to the compatibility tool it had before DeckCompanion took over.
+\"Use DeckCompanion for all games\" turns off. Apply restarts Steam once."
+	restore_dialog.ok_button_text = "Restore all"
+	restore_dialog.cancel_button_text = "Keep DeckCompanion"
+	restore_dialog.min_size = Vector2i(720,260)
+	restore_dialog.confirmed.connect(func(): _request("restore-all"))
+	restore_dialog.canceled.connect(_restore_modal_focus)
+	add_child(restore_dialog)
 	remove_dialog = ConfirmationDialog.new()
 	remove_dialog.title = "Remove this game?"
 	remove_dialog.dialog_text = "Removes only the Steam shortcut and library entry after Apply.\nYour game files and save prefix are kept."
@@ -315,6 +326,11 @@ func _save_ui_config() -> void:
 	ui_config.set_value("library","filter",filter)
 	ui_config.set_value("library","sort_by_name",sort_by_name)
 	ui_config.save("user://ui.cfg")
+
+func _confirm_restore() -> void:
+	modal_focus = get_viewport().gui_get_focus_owner()
+	restore_dialog.popup_centered()
+	restore_dialog.get_cancel_button().grab_focus()
 
 func _restore_modal_focus() -> void:
 	if is_instance_valid(modal_focus) and modal_focus.is_visible_in_tree(): modal_focus.grab_focus()
@@ -371,6 +387,11 @@ func _completed(command: String, data: Dictionary) -> void:
 			"default":
 				status = data
 				notice = "Change saved. Apply when you’re ready."
+			"restore-all":
+				notice = "Restoring %d game%s. Apply to restart Steam once." % [int(data.get("restoring",0)),"" if int(data.get("restoring",0)) == 1 else "s"]
+				settings.clear()
+				_request("status")
+				return
 			"game": selected = data
 			"enable", "disable", "mod", "game-option":
 				selected.merge(data,true)
@@ -811,6 +832,11 @@ func _settings_screen() -> void:
 	var takeover_on: bool = settings.get("takeover_all",true)
 	var takeover_row := _setting_row(general,"Use DeckCompanion for all games","Every installed Windows game, including ones with their own Steam setting. Turning it off restores each game's previous tool." + (" (%d of %d games)" % [int(counts.get("on",0)),int(counts.get("eligible",0))] if counts.has("eligible") else ""))
 	_state_switch(takeover_row,"takeover_all",takeover_on,func(): _request("settings",["--set","takeover_all="+("off" if takeover_on else "on")]),not settings.is_empty())
+	var snapshot: Variant = status.get("takeover_snapshot")
+	if snapshot is Dictionary:
+		var when := str(snapshot.get("taken_at","")).get_slice("T",0)
+		var restore_row := _setting_row(general,"Restore previous Steam settings","Saved %s for %d game%s. Turns off \"all games\" and puts every game back on its old tool." % [when,int(snapshot.get("games",0)),"" if int(snapshot.get("games",0)) == 1 else "s"])
+		_chip("Restore all",_confirm_restore,restore_row,"restore_all",false,WARN).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var splash_enabled: bool = settings.get("splash",true)
 	var splash_row := _setting_row(general,"Launch splash","Shows Proton, fixes and mods before a game starts. A skips, Y holds.")
 	_state_switch(splash_row,"splash_toggle",splash_enabled,func(): _request("settings",["--splash","off" if splash_enabled else "on"]),not settings.is_empty())
@@ -1045,7 +1071,7 @@ func _input(event: InputEvent) -> void:
 		hints.queue_redraw()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if dialog.visible or licenses.visible or remove_dialog.visible or backend.busy: return
+	if dialog.visible or licenses.visible or remove_dialog.visible or restore_dialog.visible or backend.busy: return
 	if event.is_action_pressed("ui_cancel"): _back()
 	elif event.is_action_pressed("dc_left") or event.is_action_pressed("dc_right"): _switch_tab(Nav.next_index(tab,-1 if event.is_action_pressed("dc_left") else 1,3))
 	elif event.is_action_pressed("dc_x"):
