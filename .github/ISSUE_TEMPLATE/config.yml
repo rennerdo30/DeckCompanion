@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: How to write a recipe
+    url: https://github.com/rennerdo30/DeckCompanion/blob/main/CONTRIBUTING.md
+    about: Recipe format, rules and how to test and submit one

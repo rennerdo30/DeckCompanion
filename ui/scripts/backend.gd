@@ -28,6 +28,9 @@ func _ready() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--scenario="): scenario = arg.trim_prefix("--scenario=")
 	games = fixture("games").get("games", [])
+	# Website screenshots: neutral names only (no third-party trademarks, owner rule).
+	if "--marketing" in OS.get_cmdline_user_args():
+		games = JSON.parse_string(JSON.stringify(games).replace("Farming Simulator 25","Harvest Valley").replace("FS25 Deck Mode","Handheld Mode").replace("FS25_DeckMode","HandheldMode"))
 	set_process(false)
 
 static func fixture(name: String) -> Dictionary:

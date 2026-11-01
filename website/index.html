@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeckCompanion: fixes, mods and the right Proton for every Steam Deck game</title>
+<meta name="description" content="DeckCompanion picks the right Proton, applies community and per-game fixes and installs mods for your Steam Deck games. One line to install, controller-first, and easy to undo.">
+<meta property="og:title" content="DeckCompanion">
+<meta property="og:description" content="Fixes, mods and the right Proton for every Steam Deck game. One line to install.">
+<meta property="og:image" content="https://deckcompanion.renner.dev/assets/hero.png">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/icon-256.png">
+<style>
+:root{
+  --bg:#070d12; --bg2:#0b141b; --surface:#101c25; --surface2:#16262f; --line:#24404c;
+  --ink:#e7f1f4; --muted:#93a9b4; --mint:#b8f18b; --cream:#e9d9a0; --teal:#2f6f68;
+  --radius:18px; --max:1180px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 "Inter","Segoe UI",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--mint);text-decoration:none}
+a:hover{text-decoration:underline}
+img{max-width:100%;height:auto;display:block}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+
+/* top bar */
+header.top{position:sticky;top:0;z-index:20;background:rgba(7,13,18,.78);backdrop-filter:blur(12px);border-bottom:1px solid rgba(36,64,76,.6)}
+header.top .wrap{display:flex;align-items:center;gap:14px;height:64px}
+.brand{display:flex;align-items:center;gap:10px;color:var(--ink);font-weight:700;font-size:19px}
+.brand img{width:34px;height:34px}
+.brand span b{color:var(--mint)}
+nav{margin-left:auto;display:flex;gap:22px;align-items:center}
+nav a{color:var(--muted);font-weight:600;font-size:15px}
+nav a:hover{color:var(--ink);text-decoration:none}
+.btn{display:inline-flex;align-items:center;gap:8px;border-radius:999px;padding:10px 20px;font-weight:700;font-size:15px;border:1px solid var(--line);color:var(--ink);background:transparent;cursor:pointer}
+.btn.primary{background:var(--mint);color:#0b1610;border-color:var(--mint)}
+.btn.primary:hover{filter:brightness(1.06);text-decoration:none}
+.btn:hover{text-decoration:none;border-color:var(--mint)}
+
+/* hero */
+.hero{position:relative;overflow:hidden;padding:90px 0 60px}
+.hero::before{content:"";position:absolute;inset:0;background:url(assets/hero.png) center 70%/cover no-repeat;opacity:.35;mask-image:linear-gradient(to bottom,#000 30%,transparent 95%);-webkit-mask-image:linear-gradient(to bottom,#000 30%,transparent 95%)}
+.hero .wrap{position:relative;display:grid;grid-template-columns:1.05fr 1fr;gap:48px;align-items:center}
+.kicker{display:inline-block;color:var(--mint);font-weight:700;letter-spacing:.14em;font-size:13px;text-transform:uppercase;margin-bottom:14px}
+h1{font-size:clamp(38px,5vw,62px);line-height:1.05;margin:0 0 18px;letter-spacing:-.02em}
+h1 em{font-style:normal;color:var(--mint)}
+.lead{font-size:20px;color:#c3d3da;max-width:34em;margin:0 0 28px}
+.install{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:14px 14px 14px 18px;display:flex;align-items:center;gap:12px;font:15px/1.4 ui-monospace,"Cascadia Code",Consolas,monospace;color:var(--ink);max-width:560px}
+.install code{flex:1;overflow-x:auto;white-space:nowrap}
+.install code b{color:var(--mint);font-weight:400}
+.copy{flex:none;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:7px 12px;font:600 13px system-ui;cursor:pointer}
+.copy.done{border-color:var(--mint);color:var(--mint)}
+.hint{color:var(--muted);font-size:14px;margin:12px 0 0}
+.device{border-radius:26px;padding:14px;background:linear-gradient(160deg,#1b2a33,#0e171d);box-shadow:0 40px 80px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.06);border:1px solid #23363f}
+.device img{border-radius:14px}
+
+/* sections */
+section{padding:84px 0}
+h2{font-size:clamp(28px,3.4vw,40px);margin:0 0 12px;letter-spacing:-.01em}
+.sub{color:var(--muted);font-size:18px;max-width:46em;margin:0 0 40px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.card{background:var(--surface);border:1px solid rgba(36,64,76,.7);border-radius:var(--radius);padding:24px}
+.card h3{margin:10px 0 6px;font-size:19px}
+.card p{margin:0;color:var(--muted);font-size:15.5px}
+.icon{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:rgba(184,241,139,.12);color:var(--mint);font-size:21px}
+
+/* showcase */
+.show{display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:center;margin-bottom:84px}
+.show:last-child{margin-bottom:0}
+.show.flip .text{order:2}
+.show .text h3{font-size:28px;margin:0 0 12px;letter-spacing:-.01em}
+.show .text p{color:#c3d3da;font-size:17px;margin:0 0 14px}
+.show ul{margin:0;padding:0;list-style:none}
+.show li{padding-left:26px;position:relative;color:var(--muted);margin:8px 0}
+.show li::before{content:"";position:absolute;left:4px;top:10px;width:9px;height:9px;border-radius:50%;background:var(--mint)}
+
+/* steps */
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;counter-reset:s}
+.step{background:var(--surface);border-radius:var(--radius);padding:26px;border:1px solid rgba(36,64,76,.7);position:relative}
+.step::before{counter-increment:s;content:counter(s);position:absolute;top:22px;right:24px;font-size:44px;font-weight:800;color:rgba(184,241,139,.18)}
+.step h3{margin:0 0 6px;font-size:19px}
+.step p{margin:0;color:var(--muted);font-size:15.5px}
+
+/* faq */
+details{background:var(--surface);border:1px solid rgba(36,64,76,.7);border-radius:14px;padding:18px 22px;margin:0 0 12px}
+summary{cursor:pointer;font-weight:700;font-size:17px;list-style:none}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"+";float:right;color:var(--mint);font-weight:800}
+details[open] summary::after{content:"–"}
+details p{color:var(--muted);margin:12px 0 0}
+
+.cta{text-align:center;background:radial-gradient(ellipse at top,rgba(47,111,104,.35),transparent 60%),var(--bg2);border-top:1px solid rgba(36,64,76,.6);border-bottom:1px solid rgba(36,64,76,.6)}
+.cta .install{margin:24px auto 0}
+footer{padding:40px 0 60px;color:var(--muted);font-size:14px}
+footer .wrap{display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between}
+footer p{margin:0;max-width:52em}
+
+.hero .wrap>*,.show>*,.grid>*,.steps>*{min-width:0}
+.install{max-width:100%}
+@media (max-width:920px){
+  .hero .wrap,.show{grid-template-columns:1fr}
+  .show.flip .text{order:0}
+  .grid,.steps{grid-template-columns:1fr}
+  nav a:not(.btn){display:none}
+  .hero{padding-top:56px}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#"><img src="assets/icon.svg" alt=""><span>Deck<b>Companion</b></span></a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#recipes">Recipes</a>
+      <a href="#faq">FAQ</a>
+      <a class="btn" href="https://github.com/rennerdo30/DeckCompanion">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="hero">
+  <div class="wrap">
+    <div>
+      <span class="kicker">For Steam Deck · SteamOS</span>
+      <h1>Every game, <em>set up right</em>, before you press play.</h1>
+      <p class="lead">DeckCompanion picks the right Proton for each game, applies community and per-game fixes, installs mods and shows you exactly what runs, all from a controller-friendly app in your Steam library.</p>
+      <div class="install" id="install">
+        <code><b>$</b> curl -fsSL https://deckcompanion.renner.dev/install.sh | sh</code>
+        <button class="copy" data-copy="curl -fsSL https://deckcompanion.renner.dev/install.sh | sh">Copy</button>
+      </div>
+      <p class="hint">Run it once in Desktop Mode (Konsole). No root, no system changes. Everything lives in your home folder and survives SteamOS updates.</p>
+    </div>
+    <div class="device"><img src="assets/shots/preview.png" alt="DeckCompanion library on a Steam Deck with a live game preview" width="1280" height="800"></div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <h2>Less tinkering. More playing.</h2>
+    <p class="sub">The fixes the community already knows, the Proton Valve recommends, and the mods that make games handheld-friendly, applied automatically and always reversible.</p>
+    <div class="grid">
+      <div class="card"><div class="icon">⚙</div><h3>The right Proton, per game</h3><p>Recipe pins first, then your choice, then community fixes in GE-Proton, then Valve's own recommendation. You can always override it.</p></div>
+      <div class="card"><div class="icon">✓</div><h3>Community fixes built in</h3><p>Runs the umu-protonfixes community fixes for known games and adds DeckCompanion's own recipe steps on top.</p></div>
+      <div class="card"><div class="icon">✦</div><h3>Mods, installed for you</h3><p>Recipes can install verified mods into the game, like a handheld mode for big strategy and simulation games, and keep them up to date.</p></div>
+      <div class="card"><div class="icon">▶</div><h3>A launch screen that explains</h3><p>Every launch shows the Proton build, the fixes and the mods in use. Skip with A, hold with Y to read.</p></div>
+      <div class="card"><div class="icon">＋</div><h3>Store launchers in one click</h3><p>Epic, GOG, EA, Ubisoft and Battle.net install into their own prefix and land in your Steam library.</p></div>
+      <div class="card"><div class="icon">↺</div><h3>Undo everything</h3><p>DeckCompanion keeps a snapshot of your Steam compatibility settings. One button puts every game back the way it was.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="show">
+      <div class="text">
+        <h3>Your library, with context</h3>
+        <p>Sorted by what you played last, with artwork, filters and a live preview: which Proton runs, which fixes apply, which mods are installed.</p>
+        <ul><li>Filters for fixes, enabled games, non-Steam games and games that need attention</li><li>Made for the 7-inch screen and a controller; touch works too</li></ul>
+      </div>
+      <div class="device"><img src="assets/shots/library.png" alt="Library view" loading="lazy" width="1280" height="800"></div>
+    </div>
+    <div class="show flip">
+      <div class="text">
+        <h3>Per-game control</h3>
+        <p>Turn DeckCompanion on or off per game, choose a Proton build, toggle mods and read the last launch log, all on one screen.</p>
+        <ul><li>Recipes describe Proton, Wine fixes, mods and settings in one file</li><li>Mods are verified by checksum and removed cleanly</li></ul>
+      </div>
+      <div class="device"><img src="assets/shots/detail.png" alt="Game detail view" loading="lazy" width="1280" height="800"></div>
+    </div>
+    <div class="show">
+      <div class="text">
+        <h3>Know what you're launching</h3>
+        <p>A short launch screen shows the game's artwork with the Proton build, community fixes and mods. Then your game starts.</p>
+        <ul><li>Adjustable from 1 to 10 seconds, or off</li><li>Never blocks a launch: if anything fails, the game still starts</li></ul>
+      </div>
+      <div class="device"><img src="assets/shots/splash.png" alt="Launch splash" loading="lazy" width="1280" height="800"></div>
+    </div>
+    <div class="show flip">
+      <div class="text">
+        <h3>Settings that respect your setup</h3>
+        <p>Use DeckCompanion for all games or only some, restore your previous Steam settings with one button, manage GE-Proton builds and Decky, and pick an accent colour.</p>
+        <ul><li>Updates for recipes, mods and Proton arrive on their own, without reinstalling the app</li></ul>
+      </div>
+      <div class="device"><img src="assets/shots/settings.png" alt="Settings view" loading="lazy" width="1280" height="800"></div>
+    </div>
+  </div>
+</section>
+
+<section id="how" class="cta" style="text-align:left">
+  <div class="wrap">
+    <h2>How it works</h2>
+    <p class="sub">DeckCompanion is a Steam compatibility tool plus a management app. Steam hands each game to DeckCompanion, which prepares it and hands it to the right Proton.</p>
+    <div class="steps">
+      <div class="step"><h3>Install once</h3><p>Run the one-line installer in Desktop Mode. Steam restarts once and DeckCompanion appears in your library.</p></div>
+      <div class="step"><h3>Pick your games</h3><p>Use it for all games or only the ones you choose. Your previous settings are saved and can be restored any time.</p></div>
+      <div class="step"><h3>Play</h3><p>Each launch applies the recipe, community fixes and mods, then starts the game with the right Proton.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="recipes">
+  <div class="wrap">
+    <div class="show">
+      <div class="text">
+        <h3>Recipes are open, and you can add yours</h3>
+        <p>A recipe is a small TOML file per game: the Proton build, Wine fixes, mods and settings. Recipes ship separately from the app, so a fix reaches every Deck without a new release.</p>
+        <p><a href="https://github.com/rennerdo30/DeckCompanion/blob/main/CONTRIBUTING.md">Submit a recipe or a fix →</a></p>
+      </div>
+      <div class="device"><img src="assets/shots/add-launchers.png" alt="Add a game: store launchers and Windows games" loading="lazy" width="1280" height="800"></div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <h2>Questions</h2>
+    <details><summary>Does it change my system?</summary><p>No. DeckCompanion installs into your home folder only, needs no root and no system packages, and keeps working after SteamOS updates.</p></details>
+    <details><summary>Can I go back to how things were?</summary><p>Yes. DeckCompanion stores a snapshot of every Steam compatibility setting it changes. "Restore all" in Settings puts every game back, and uninstalling does the same.</p></details>
+    <details><summary>Which Proton does a game get?</summary><p>In this order: a recipe's pinned build, your own choice, GE-Proton when a community fix exists, Valve's recommendation, then the newest installed build.</p></details>
+    <details><summary>Do I need Decky?</summary><p>No. Decky is optional. If you use it, DeckCompanion can add a Quick Access Menu panel for the current game.</p></details>
+    <details><summary>Is it free?</summary><p>Yes, DeckCompanion is open source under the MIT license.</p></details>
+  </div>
+</section>
+
+<section class="cta">
+  <div class="wrap">
+    <h2>Ready when you are</h2>
+    <p class="sub" style="margin:0 auto">Open Konsole in Desktop Mode and paste one line.</p>
+    <div class="install">
+      <code><b>$</b> curl -fsSL https://deckcompanion.renner.dev/install.sh | sh</code>
+      <button class="copy" data-copy="curl -fsSL https://deckcompanion.renner.dev/install.sh | sh">Copy</button>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>DeckCompanion is an independent open-source project (MIT). It is not affiliated with or endorsed by Valve or any game publisher. Steam, Steam Deck and SteamOS are trademarks of Valve Corporation. Game artwork shown in screenshots belongs to its respective owners.</p>
+    <p><a href="https://github.com/rennerdo30/DeckCompanion">GitHub</a> · <a href="https://github.com/rennerdo30/DeckCompanion/blob/main/CONTRIBUTING.md">Contribute a recipe</a> · <a href="https://renner.dev">renner.dev</a></p>
+  </div>
+</footer>
+<script>
+document.querySelectorAll(".copy").forEach(function (b) {
+  b.addEventListener("click", function () {
+    navigator.clipboard.writeText(b.dataset.copy).then(function () {
+      b.textContent = "Copied"; b.classList.add("done");
+      setTimeout(function () { b.textContent = "Copy"; b.classList.remove("done"); }, 1800);
+    });
+  });
+});
+</script>
+</body>
+</html>

@@ -1,8 +1,22 @@
 # DeckCompanion
 
-An offline-capable recipe engine and controller-friendly companion for Steam Deck.
-Python >= 3.11, standard library only at runtime; vendored MIT `vdf` handles Steam's
-text and binary formats. Target: SteamOS 3.9. Project license: MIT, rennerdo30.
+**Fixes, mods and the right Proton for every Steam Deck game.** Website: <https://deckcompanion.renner.dev>
+
+DeckCompanion is a Steam compatibility tool plus a controller-first app in your Steam library:
+- **Proton per game:** picks the right build for each game (recipe pin, your choice, GE-Proton when a community fix exists, Valve's recommendation).
+- **Fixes and mods:** applies community and per-game fixes and installs mods.
+- **Launch splash:** shows what runs at every launch.
+- **Undo:** a snapshot of your Steam settings lets you restore everything with one button.
+
+Install it once in Desktop Mode (Konsole):
+
+```sh
+curl -fsSL https://deckcompanion.renner.dev/install.sh | sh
+```
+
+Want to add a recipe or a fix for a game? See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Technical: Python >= 3.11 (standard library only at runtime, vendored MIT `vdf` for Steam's formats), Godot 4.7 UI, target SteamOS 3.9. License: MIT.
 
 ## Non-Steam Windows games
 
@@ -46,8 +60,10 @@ See [CLI details](docs/cli.md#decky-loader-and-independent-plugin).
 Open Konsole on your Steam Deck and paste this one line:
 
 ```sh
-curl -fsSL --proto =https --proto-redir =https --connect-timeout 10 --max-time 30 "$(timeout 60s python3 -c 'import json,re,urllib.request; releases=[]; exec("for page in range(1,11):\n with urllib.request.urlopen(\"https://api.github.com/repos/rennerdo30/DeckCompanion/releases?per_page=100&page=\"+str(page),timeout=5) as response: batch=json.loads(response.read(8388609))\n releases.extend(batch)\n if len(batch)<100: break\nelse: raise ValueError(\"Release listing exceeds bounded pagination\")"); r=max((r for r in releases if not r.get("draft") and not r.get("prerelease") and re.fullmatch(r"v[0-9]+[.][0-9]+[.][0-9]+",r.get("tag_name",""))),key=lambda r:r.get("published_at","")); print(next(a["browser_download_url"] for a in r["assets"] if a["name"]=="install.sh"))')" | timeout 300s sh
+curl -fsSL https://deckcompanion.renner.dev/install.sh | sh
 ```
+
+The website serves the repository's bootstrap `install.sh`. It finds the newest stable `v<semver>` engine release through the GitHub API, verifies its SHA256 and installs it into your home folder.
 
 Or download **DeckCompanion-Installer.desktop** from the
 [newest engine `v*` release](https://github.com/rennerdo30/DeckCompanion/releases),

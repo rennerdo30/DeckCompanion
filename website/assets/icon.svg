@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="t">
+  <title id="t">DeckCompanion</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#132330"/>
+      <stop offset="1" stop-color="#070d12"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#22394a"/>
+      <stop offset="1" stop-color="#16242f"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#b9e07a" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#b9e07a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- tile -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+
+  <g transform="translate(256 256) scale(1.07) translate(-256 -269)">
+  <!-- handheld body with grips -->
+  <path d="M146 166 H366 C430 166 470 214 470 266 C470 330 440 372 404 372 C380 372 366 356 352 334 H160 C146 356 132 372 108 372 C72 372 42 330 42 266 C42 214 82 166 146 166 Z"
+        fill="url(#body)" stroke="#b9e07a" stroke-width="10" stroke-linejoin="round"/>
+
+  <!-- d-pad -->
+  <g fill="#e9d9a0">
+    <rect x="98" y="220" width="18" height="54" rx="5"/>
+    <rect x="80" y="238" width="54" height="18" rx="5"/>
+  </g>
+  <!-- face buttons -->
+  <g fill="#e9d9a0">
+    <circle cx="414" cy="228" r="9"/>
+    <circle cx="414" cy="266" r="9"/>
+    <circle cx="395" cy="247" r="9"/>
+    <circle cx="433" cy="247" r="9"/>
+  </g>
+  <!-- sticks -->
+  <circle cx="134" cy="310" r="17" fill="#0b141b" stroke="#b9e07a" stroke-width="5"/>
+  <circle cx="378" cy="310" r="17" fill="#0b141b" stroke="#b9e07a" stroke-width="5"/>
+
+  <!-- screen -->
+  <rect x="168" y="192" width="176" height="124" rx="18" fill="#0a1218" stroke="#2f6f68" stroke-width="4"/>
+  <circle cx="256" cy="254" r="70" fill="url(#glow)"/>
+
+  <!-- gear with check: "fixed and ready" -->
+  <g transform="translate(256 254)">
+    <circle r="39" fill="none" stroke="#b9e07a" stroke-width="13" stroke-dasharray="15.3 15.3" transform="rotate(-11)"/>
+    <circle r="31" fill="#0a1218" stroke="#b9e07a" stroke-width="9"/>
+    <path d="M-14 1 L-4 11 L16 -10" fill="none" stroke="#e9d9a0" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- companion spark -->
+  <path d="M318 196 Q321 213 336 216 Q321 219 318 236 Q315 219 300 216 Q315 213 318 196 Z" fill="#e9d9a0"/>
+  <path d="M432 120 Q434 132 444 134 Q434 136 432 148 Q430 136 420 134 Q430 132 432 120 Z" fill="#b9e07a" opacity="0.85"/>
+  </g>
+</svg>

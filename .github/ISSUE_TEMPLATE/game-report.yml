@@ -1,0 +1,39 @@
+name: Game report
+description: A game needs a fix, a mod or a different Proton on the Steam Deck
+labels: ["game report"]
+body:
+  - type: input
+    id: game
+    attributes:
+      label: Game and Steam app ID
+      placeholder: "Farming Simulator 25 (2300320)"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What goes wrong on the Deck?
+      description: Crash at start, black screen, controls, tiny text, missing videos, …
+    validations:
+      required: true
+  - type: input
+    id: proton
+    attributes:
+      label: Proton builds you tried
+      placeholder: "Proton 11.0 (crash), GE-Proton11-11 (works)"
+  - type: input
+    id: steamos
+    attributes:
+      label: SteamOS and DeckCompanion version
+      placeholder: "SteamOS 3.9.5, DeckCompanion 0.4.6"
+  - type: textarea
+    id: log
+    attributes:
+      label: Launch log
+      description: Contents of ~/.local/share/deckcompanion/logs/<appid>-last.log
+      render: text
+  - type: textarea
+    id: fix
+    attributes:
+      label: Known fix or mod (optional)
+      description: Links to ProtonDB reports, mods (official source), or a recipe you tested

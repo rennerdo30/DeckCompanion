@@ -330,7 +330,7 @@ func _build_shell() -> void:
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(spacer)
-	if backend.mock: _badge(bar,"MOCK DATA",CREAM).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	if backend.mock and not "--marketing" in OS.get_cmdline_user_args(): _badge(bar,"MOCK DATA",CREAM).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	status_chip = Button.new()
 	status_chip.set_meta("focus_id","status")
 	status_chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
