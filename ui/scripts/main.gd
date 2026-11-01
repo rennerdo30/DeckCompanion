@@ -21,7 +21,7 @@ var decky_dialog: ConfirmationDialog
 var launcher_backend: Node
 var launchers_data: Array = []
 var launcher_poll := 0.0
-const UI_VERSION := "0.4.6"
+const UI_VERSION := "0.4.7"
 # Design tokens (shared with the logo and Steam artwork palette).
 var INK: Color = Color("e7f1f4")
 var MUTED: Color = Color("8fa6b2")
@@ -689,7 +689,7 @@ func _games_screen() -> void:
 	toolbar.add_child(push)
 	_chip("Sort: " + ("A–Z" if sort_by_name else "Recent"),_toggle_sort,toolbar,"sort")
 	_chip("＋  Add game",func(): notice = ""; error = ""; add_flow = AddGame.new(self); launcher_backend.request("launchers"); _render(),toolbar,"add-game",true,CREAM)
-	var library := games if settings.get("show_games_without_recipe",true) else games.filter(func(game): return game.has_recipe or game.get("kind") == "non_steam")
+	var library := games if settings.get("show_games_without_recipe",true) else games.filter(func(game): return game.has_recipe or game.get("kind") in ["non_steam", "steam_shortcut"])
 	var visible := Nav.sort_games(Nav.visible_games(library,filter),sort_by_name)
 	# Land on the most relevant game, not on the filter row.
 	if (last_focus.is_empty() or SHELL_IDS.has(last_focus)) and not visible.is_empty(): last_focus = visible[0].appid
@@ -763,6 +763,7 @@ func _game_row(list: Node, game: Dictionary) -> Button:
 func _row_line(game: Dictionary) -> String:
 	var parts: Array = []
 	if game.get("kind") == "non_steam": parts.append("Non-Steam · umu")
+	elif game.get("kind") == "steam_shortcut": parts.append("Steam shortcut" + ("" if game.get("options",{}).get("proton",false) else " · native"))
 	elif game.get("has_recipe",false): parts.append(Text.fix(game))
 	else: parts.append("Steam default")
 	var build: Variant = game.get("proton")
@@ -773,7 +774,7 @@ func _row_line(game: Dictionary) -> String:
 func _row_badge(game: Dictionary) -> Array:
 	if Nav.needs_attention(game): return ["CHECK", WARN]
 	if game.get("pending") != null: return ["PENDING", CREAM]
-	if game.get("kind") == "non_steam": return ["NON-STEAM", CREAM]
+	if game.get("kind") in ["non_steam", "steam_shortcut"]: return ["NON-STEAM", CREAM]
 	if game.get("has_recipe",false): return ["FIX ON" if game.get("enabled",false) else "FIX", MINT]
 	return []
 
@@ -934,7 +935,9 @@ func _detail_screen() -> void:
 		_chip("Remove game",func(): modal_focus = get_viewport().gui_get_focus_owner(); remove_dialog.popup_centered(); remove_dialog.get_cancel_button().grab_focus(),remove_row,"remove-game",false,WARN).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	else:
 		var takeover: String = str(selected.get("takeover","n/a"))
-		if takeover != "n/a":
+		if selected.get("kind") == "steam_shortcut" and takeover == "n/a":
+			_setting_row(setup,"Steam shortcut",("Native program: Steam runs it directly." if not selected.get("options",{}).get("proton",false) else "Runs with the Proton chosen in Steam.") + "  ·  " + str(selected.get("exe","")).get_file())
+		if takeover != "n/a" and selected.get("options",{}).get("takeover",true):
 			var before: Variant = selected.get("previous_mapping")
 			var hint := "Steam's own choice before: " + str(before) if before != null else "DeckCompanion picks Proton, fixes and mods."
 			var takeover_row := _setting_row(setup,"Run through DeckCompanion",hint)
@@ -988,7 +991,8 @@ func _proton_picker(parent: Node) -> void:
 	picker.selected = names.find(str(build.get("name",""))) + 1 if reason == "user_override" and build is Dictionary else 0
 	picker.item_selected.connect(func(index): _request("game-option",[selected.appid,"--proton","auto" if index == 0 else names[index-1]]))
 	picker.focus_entered.connect(func(): last_focus = "proton_pick")
-	picker.disabled = backend.busy or selected.get("kind") == "non_steam" and names.is_empty()
+	var proton_allowed: bool = selected.get("options",{}).get("proton",true)
+	picker.disabled = backend.busy or not proton_allowed or (selected.get("kind") == "non_steam" and names.is_empty())
 	row.add_child(picker)
 	if not picker.disabled: controls.append(picker)
 

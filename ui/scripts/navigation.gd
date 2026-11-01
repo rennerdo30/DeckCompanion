@@ -7,7 +7,7 @@ static func visible_games(games: Array, filter: int) -> Array:
 		match filter:
 			1: return g.get("has_recipe", false)
 			2: return g.get("enabled", false)
-			3: return g.get("kind") == "non_steam"
+			3: return g.get("kind") in ["non_steam", "steam_shortcut"]
 			4: return needs_attention(g)
 		return true)
 

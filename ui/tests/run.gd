@@ -405,6 +405,27 @@ func settings_checks(ui: Node) -> void:
 	ui._set_theme("text",1.0)
 	ui._set_theme("background","default")
 	ui._switch_tab(1)
+	# DC-37: existing Steam shortcuts appear under Non-Steam with capability-driven controls.
+	var saved_games: Array = ui.games.duplicate(true)
+	ui.games.append({"appid":"3135360851","name":"Battle.net","installed":true,"has_recipe":false,"enabled":false,"pending":null,"mods":[],"last_launch":null,"kind":"steam_shortcut","takeover":"on","previous_mapping":"Proton-GE Latest","options":{"proton":true,"takeover":true},"exe":"/home/deck/pfx/Battle.net Launcher.exe"})
+	ui.games.append({"appid":"3118654025","name":"renner.dev Launcher","installed":true,"has_recipe":false,"enabled":false,"pending":null,"mods":[],"last_launch":null,"kind":"steam_shortcut","takeover":"n/a","options":{"proton":false,"takeover":false},"exe":"/home/deck/launcher.AppImage"})
+	ui._switch_tab(0)
+	ui._set_filter(3)
+	await process_frame
+	check(control(ui,"3135360851") != null and control(ui,"3118654025") != null,"Non-Steam filter lists existing Steam shortcuts")
+	ui.selected = ui.games.filter(func(g): return g.appid == "3118654025")[0]
+	ui.detail = true
+	ui._render()
+	await process_frame
+	check(control(ui,"takeover") == null and ui.body.find_children("*","OptionButton",true,false).all(func(o): return o.disabled),"native shortcut offers no takeover and no Proton choice")
+	ui.selected = ui.games.filter(func(g): return g.appid == "3135360851")[0]
+	ui._render()
+	await process_frame
+	check(control(ui,"takeover") != null,"Windows shortcut can be routed through DeckCompanion")
+	ui.detail = false
+	ui.games = saved_games
+	ui._set_filter(0)
+	ui._switch_tab(1)
 	check(control(ui,"default") == null and control(ui,"splash_toggle") == null,"Updates keeps status and its own update check, no settings toggles")
 	var other: Node = load("res://main.tscn").instantiate()
 	root.add_child(other)
