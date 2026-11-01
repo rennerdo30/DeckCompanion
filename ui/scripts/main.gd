@@ -13,6 +13,10 @@ var restore_dialog: ConfirmationDialog
 var proton_remove_dialog: ConfirmationDialog
 var pending_proton_remove := ""
 var available_data: Dictionary = {}
+var decky_backend: Node
+var decky_status: Dictionary = {}
+var plugin_status: Dictionary = {}
+var decky_handoff: Dictionary = {}
 var launcher_backend: Node
 var launchers_data: Array = []
 var launcher_poll := 0.0
@@ -88,6 +92,9 @@ func _ready() -> void:
 	update_backend = Backend.new()
 	add_child(update_backend)
 	update_backend.completed.connect(_update_completed)
+	decky_backend = Backend.new()
+	add_child(decky_backend)
+	decky_backend.completed.connect(_decky_completed)
 	launcher_backend = Backend.new()
 	add_child(launcher_backend)
 	launcher_backend.completed.connect(_launchers_completed)
@@ -352,6 +359,50 @@ func _launchers_completed(command: String, data: Dictionary) -> void:
 		elif data.get("removed",false): notice = "%s removed. Its prefix and saves are kept." % data.launcher.name
 		launcher_backend.request.call_deferred("launchers")
 	if add_flow != null: _render()
+
+func _decky_completed(_command: String, data: Dictionary) -> void:
+	var action: String = str(decky_backend.get_meta("action",""))
+	if data.has("error"): notice = "Decky: " + str(data.error.message)
+	elif action == "status": decky_status = data
+	elif action == "plugin-status": plugin_status = data
+	elif action == "install": decky_handoff = data
+	elif action == "plugin-install":
+		notice = "DeckCompanion plugin %s. Reload plugins in Decky." % ("installed" if data.get("changed",false) else "is already up to date")
+		_request_decky("plugin-status")
+		return
+	if action == "status": _request_decky.call_deferred("plugin-status")
+	if tab == 2: _render()
+
+func _request_decky(action: String) -> void:
+	if decky_backend.busy: return
+	decky_backend.set_meta("action",action)
+	decky_backend.request("decky",[action])
+
+func _decky_card(column: Node) -> void:
+	var card := _card(column,"Decky")
+	var loader_line := "Checking…"
+	if not decky_status.is_empty():
+		var latest: Variant = decky_status.get("latest",{}).get("version")
+		loader_line = ("Installed %s" % str(decky_status.get("version","")) if decky_status.get("installed",false) else "Not installed") + ("  ·  latest %s" % str(latest) if latest != null else "")
+	var loader_row := _setting_row(card,"Decky Loader",loader_line + "  ·  the plugin system for Game Mode")
+	_chip("Update" if decky_status.get("installed",false) else "Install",func(): _request_decky("install"),loader_row,"decky_install",false,MINT,not decky_backend.busy).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	if not decky_handoff.is_empty():
+		if decky_handoff.get("launched",false): _paragraph(card,"The official installer opened in Konsole. Enter your sudo password there.",MINT)
+		else:
+			_paragraph(card,"Decky's installer needs your password, so it runs in Desktop Mode:",INK)
+			for step in decky_handoff.get("instructions",[]): _paragraph(card,"•  " + str(step))
+			var command := _label(str(decky_handoff.get("command","")),16,MINT)
+			command.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			card.add_child(command)
+	var plugin_line := "Checking…"
+	if not plugin_status.is_empty():
+		var latest_plugin: Variant = plugin_status.get("latest",{}).get("version")
+		plugin_line = ("Installed %s" % str(plugin_status.get("version","")) if plugin_status.get("installed",false) else "Not installed") + ("  ·  latest %s" % str(latest_plugin) if latest_plugin != null else "  ·  no release yet")
+	var plugin_row := _setting_row(card,"DeckCompanion in the Quick Access Menu",plugin_line)
+	var newer: bool = plugin_status.get("latest",{}).get("version") != null and plugin_status.get("version") != plugin_status.get("latest",{}).get("version")
+	if plugin_status.get("can_install",false) and (newer or not plugin_status.get("installed",false)):
+		_chip("Update" if plugin_status.get("installed",false) else "Install",func(): _request_decky("plugin-install"),plugin_row,"plugin_install",false,MINT,not decky_backend.busy).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	for step in plugin_status.get("instructions",[]): _paragraph(card,"•  " + str(step))
 
 func launchers_busy() -> bool:
 	return launchers_data.any(func(l): return l.get("state") == "installing")
@@ -895,6 +946,7 @@ func _settings_screen() -> void:
 	_setting_toggle(updates,"cleanup_old_ge","Clean up old GE-Proton","Removes only builds DeckCompanion installed and no longer needs.")
 	var check_row := _setting_row(updates,"Check for updates","Engine, recipes and Proton builds.")
 	_chip("Checking…" if update_backend.busy else "Check now",_check_updates,check_row,"check").size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_decky_card(columns[1])
 	var about := _card(columns[1],"About")
 	_paragraph(about,"Engine %s  ·  UI %s\n%s" % [status.get("version","not connected"),UI_VERSION,status.get("install_path","Install path not reported")])
 	_paragraph(about,"Uninstall (close Steam first, your data is kept):",MUTED,16)
@@ -1104,6 +1156,7 @@ func _switch_tab(value: int) -> void:
 	detail = false
 	add_flow = null
 	last_focus = ["games","updates","settings"][value]
+	if value == 2 and decky_status.is_empty(): _request_decky("status")
 	if value == 1 and not proton_backend.busy: proton_backend.request("proton")
 	_render()
 

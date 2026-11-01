@@ -374,6 +374,18 @@ func settings_checks(ui: Node) -> void:
 	ui._request("restore-all")
 	await create_timer(0.7).timeout
 	check(ui.notice.contains("Restoring 6 games") and control(ui,"restore_all") == null and not ui.settings.get("takeover_all",true),"restore turns takeover off, queues restores and hides the button")
+	# Decky card (DC-28/29): loader handoff and independent plugin install.
+	ui.decky_status = {}
+	ui._switch_tab(1)
+	ui._switch_tab(2)
+	await create_timer(0.6).timeout
+	check(control(ui,"decky_install") != null and control(ui,"plugin_install") != null,"Settings shows Decky Loader and plugin actions")
+	control(ui,"decky_install").pressed.emit()
+	await create_timer(0.3).timeout
+	check(ui.decky_handoff.get("needs_desktop",false) and ui.body.find_children("*","Label",true,false).any(func(l): return l.text.begins_with("curl -L")),"Loader install shows the official Desktop Mode command, no password prompt")
+	control(ui,"plugin_install").pressed.emit()
+	await create_timer(0.6).timeout
+	check(ui.notice.contains("plugin installed") and control(ui,"plugin_install") == null,"plugin installs independently and the button disappears when current")
 	ui._switch_tab(1)
 	check(control(ui,"default") == null and control(ui,"splash_toggle") == null,"Updates keeps status and its own update check, no settings toggles")
 	var other: Node = load("res://main.tscn").instantiate()
