@@ -10,7 +10,7 @@ const AddGame = preload("res://scripts/add_game.gd")
 var add_flow: RefCounted
 var remove_dialog: ConfirmationDialog
 var restore_dialog: ConfirmationDialog
-const UI_VERSION := "0.4.2"
+const UI_VERSION := "0.4.3"
 # Design tokens (shared with the logo and Steam artwork palette).
 const INK := Color("e7f1f4")
 const MUTED := Color("8fa6b2")
