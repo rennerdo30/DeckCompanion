@@ -174,6 +174,7 @@ def apply(paths, restart=False):
         data["shortcut_pending"] = False
         changes.append({"action": "shortcut"})
     originals = {p: p.read_bytes() if p.exists() else None for p, _ in writes}
+    originals.update({p: p.read_bytes() for p in cleanup if p.exists()})
     written = []
     try:
         for path, payload in writes:
@@ -183,6 +184,7 @@ def apply(paths, restart=False):
             if path.exists() and path.read_text(encoding="utf-8").startswith("# managed-by: DeckCompanion\n"):
                 require_closed()
                 path.unlink()
+                written.append(path)
         save_state(paths, data)
     except Exception:
         for path in reversed(written):

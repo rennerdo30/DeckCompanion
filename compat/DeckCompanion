@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Stable compat launcher; engine upgrades never replace this while a game runs."""
+import os
+from pathlib import Path
+import sys
+
+home = Path(os.environ.get("DECKCOMPANION_HOME", str(Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))) / "deckcompanion")))
+version = (home / "current").read_text(encoding="utf-8").strip()
+if not version or Path(version).name != version or version in (".", ".."):
+    raise SystemExit("Invalid DeckCompanion current pointer")
+root = home / "versions" / version
+sys.path[:0] = [str(root / "src"), str(root)]
+os.environ["PYTHONPATH"] = os.pathsep.join([str(root / "src"), str(root)])
+from deckcompanion.cli import main
+raise SystemExit(main(["launch", *sys.argv[1:]]))

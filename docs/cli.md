@@ -50,5 +50,27 @@ userdata account for the shortcut; required if there is more than one account.
 No writes to Steam on list/query/queue commands. State writers serialize with an OS
 lock. A malformed isolation override never falls back to the real home directory.
 
-Upcoming stacked slices add `launch`, `update`, `rollback`, `install`, `uninstall`.
+## Launch (slice 2)
+
+`launch [--json] VERB CMD...` is called by the stable compatibility launcher. It
+passes argument boundaries intact to `<proton>/proton VERB CMD...` with `execve`.
+Successful launch replaces the process, so it emits no JSON success object. Its
+errors use the normal JSON envelope. After VERB, every argument belongs to the
+game, including `--json`. Runtime env and launch options come from the recipe.
+
+`last_launch.ok` means preparation/handoff succeeded, not that the game ran or
+exited successfully. The engine cannot observe the result after `execve`.
+Missing/corrupt optional content logs a warning and uses installed content. All
+launch network requests share a two-second wall budget, implemented in an owned
+worker subprocess so DNS and slow bodies are bounded too. No index/latest API
+requests at launch. Hash-verified cached mods work offline. Install a runtime in
+advance for large GE archives; a two-second launch budget rarely accommodates one.
+
+Localfixes call upstream `early()` and `main()` from the running protonfixes package
+before our additions. Wine installs/registry steps use `@util.once(retry=True)`;
+environment and DLL overrides apply each invocation. Foreign localfixes are
+preserved. Prefix content is deferred until a subsequent launch when `pfx` exists.
+Symlinked Documents directories outside the prefix are refused and logged.
+
+Upcoming stacked slice adds `update`, `rollback`, `install`, `uninstall`.
 No command or integration has been verified on hardware.

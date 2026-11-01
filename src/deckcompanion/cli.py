@@ -44,6 +44,10 @@ def parser():
             group.add_argument("--off", action="store_true")
         if name == "apply":
             sub.add_argument("--restart-steam", action="store_true")
+    launch = commands.add_parser("launch")
+    launch.add_argument("--json", action="store_true")
+    launch.add_argument("verb")
+    launch.add_argument("cmd", nargs=argparse.REMAINDER)
     return root
 
 
@@ -87,6 +91,10 @@ def main(argv=None):
     try:
         args = parser().parse_args(argv)
         paths = Paths.env()
+        if args.command == "launch":
+            from .launch import launch
+            launch(paths, args.verb, args.cmd)
+            return 0
         with locked(paths):
             result = execute(args, paths)
         print(json.dumps(result, ensure_ascii=False))
