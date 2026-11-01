@@ -109,6 +109,47 @@ def install():
     return result
 
 
+def install_via_desktop(paths):
+    """Game Mode flow: switch to Desktop Mode and open the official installer there once.
+
+    Decky's installer needs root, so it must prompt for the password itself in a
+    terminal. A one-time autostart entry opens Konsole with the official command as
+    soon as the Plasma session starts and deletes itself first (owner UX report,
+    2026-11-01: no raw commands in the Game Mode UI).
+    """
+    if not sys.platform.startswith("linux"):
+        raise Error("unsupported", "Decky installs only on SteamOS / Linux")
+    selector = shutil.which("steamos-session-select") or shutil.which("holo-session-select")
+    if not selector or not shutil.which("konsole"):
+        raise Error("desktop_unavailable", "Desktop Mode or Konsole is not available on this system")
+    home = Path.home()
+    autostart = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config")) / "autostart" / "deckcompanion-decky-install.desktop"
+    script = paths.data / "run" / "decky-install.sh"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    autostart.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(
+        "#!/bin/sh\n"
+        f"rm -f '{autostart}'\n"
+        "exec konsole --separate -e sh -c '"
+        "echo \"DeckCompanion: installing Decky Loader with the official installer.\"; "
+        "echo \"Enter your password when asked.\"; echo; "
+        f"{INSTALL_COMMAND}; "
+        "echo; echo \"Done. Use Return to Gaming Mode on the desktop.\"; sleep 600'\n",
+        encoding="utf-8")
+    script.chmod(0o755)
+    autostart.write_text(
+        "[Desktop Entry]\nType=Application\nName=DeckCompanion: install Decky\n"
+        f"Exec=sh {script}\nX-KDE-autostart-phase=2\nNoDisplay=true\n", encoding="utf-8")
+    runner = shutil.which("systemd-run")
+    command = [selector, "plasma"]
+    # Detached so the switch survives this process (Steam and the UI exit with Game Mode).
+    if runner:
+        command = [runner, "--user", "--collect", "--unit=deckcompanion-desktop-" + str(time.time_ns()),
+                   "--property=RuntimeMaxSec=120", "--"] + command
+    steam.run(command, timeout=10)
+    return {"switching": True, "autostart": str(autostart)}
+
+
 def shortcut(paths):
     """Only return an appid when the installed shortcut exists in the active account."""
     import vdf

@@ -382,7 +382,12 @@ func settings_checks(ui: Node) -> void:
 	check(control(ui,"decky_install") != null and control(ui,"plugin_install") != null,"Settings shows Decky Loader and plugin actions")
 	control(ui,"decky_install").pressed.emit()
 	await create_timer(0.3).timeout
-	check(ui.decky_handoff.get("needs_desktop",false) and ui.body.find_children("*","Label",true,false).any(func(l): return l.text.begins_with("curl -L")),"Loader install shows the official Desktop Mode command, no password prompt")
+	check(not ui.body.find_children("*","Label",true,false).any(func(l): return l.text == "•  U"),"string instructions render as one line, not one bullet per character")
+	check(ui.decky_dialog.visible,"Loader update asks for confirmation first")
+	ui.decky_dialog.confirmed.emit()
+	ui.decky_dialog.hide()
+	await create_timer(0.3).timeout
+	check(ui.decky_handoff.get("switching",false) and ui.notice.contains("Desktop Mode") and not ui.body.find_children("*","Label",true,false).any(func(l): return l.text.begins_with("curl")),"Game Mode update switches to Desktop Mode, no raw command on screen")
 	control(ui,"plugin_install").pressed.emit()
 	await create_timer(0.6).timeout
 	check(ui.notice.contains("plugin installed") and control(ui,"plugin_install") == null,"plugin installs independently and the button disappears when current")

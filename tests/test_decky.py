@@ -372,3 +372,22 @@ def test_backend_cli_timeout_output_and_cleanup(monkeypatch, tmp_path, mode):
             assert result["error"]["code"] == "cli_unavailable"
             assert proc.killed is (mode != "invalid")
     asyncio.run(check())
+
+
+def test_install_via_desktop_writes_one_shot_autostart_and_switches(paths, tmp_path, monkeypatch):
+    # Owner UX report 2026-11-01: Game Mode must not show raw commands; switch and open the installer.
+    from deckcompanion import decky, steam
+    monkeypatch.setattr(decky.sys, "platform", "linux")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(decky.shutil, "which", lambda name: "/usr/bin/" + name)
+    calls = []
+    monkeypatch.setattr(steam, "run", lambda command, timeout: calls.append(command) or b"")
+    result = decky.install_via_desktop(paths)
+    autostart = tmp_path / "config/autostart/deckcompanion-decky-install.desktop"
+    script = paths.data / "run/decky-install.sh"
+    assert result["switching"] is True and autostart.is_file() and script.is_file()
+    assert f"Exec=sh {script}" in autostart.read_text()
+    text = script.read_text()
+    assert f"rm -f '{autostart}'" in text.splitlines()[1]  # one-shot: removes itself first
+    assert decky.INSTALL_COMMAND in text and "konsole" in text
+    assert calls and calls[0][-2:] == ["/usr/bin/steamos-session-select", "plasma"]

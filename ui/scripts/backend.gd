@@ -203,9 +203,10 @@ func mock_response(command: String, args: Array = []) -> Dictionary:
 	if command == "update": return fixture("update")
 	if command == "decky":
 		match args[0]:
-			"status": return {"installed": true, "version": "v3.3.1", "service": "active", "latest": {"version": "v3.3.1", "source": "github", "stale": false}}
+			"status": return {"installed": true, "version": "v3.2.8", "service": "active", "latest": {"version": "v3.3.1", "source": "github", "stale": false}}
+			"install-desktop": return {"switching": true, "autostart": "/home/deck/.config/autostart/deckcompanion-decky-install.desktop"}
 			"install": return {"needs_desktop": true, "launched": false, "command": "curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh | sh", "instructions": ["Switch to Desktop Mode.", "Open Konsole and run the command.", "Enter your sudo password when the official installer asks."]}
-			"plugin-status": return {"installed": mock_plugin, "version": "0.1.0" if mock_plugin else null, "decky_installed": true, "plugins_writable": true, "can_install": true, "instructions": [], "latest": {"version": "0.1.0", "source": "github", "stale": false}}
+			"plugin-status": return {"installed": mock_plugin, "version": "0.1.0" if mock_plugin else null, "decky_installed": true, "plugins_writable": true, "can_install": true, "instructions": "Use Decky Settings > Developer > Install Plugin from ZIP if this directory is not writable.", "latest": {"version": "0.1.0", "source": "github", "stale": false}}
 			"plugin-install":
 				mock_plugin = true
 				return {"changed": true, "version": "0.1.0"}

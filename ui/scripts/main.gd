@@ -17,6 +17,7 @@ var decky_backend: Node
 var decky_status: Dictionary = {}
 var plugin_status: Dictionary = {}
 var decky_handoff: Dictionary = {}
+var decky_dialog: ConfirmationDialog
 var launcher_backend: Node
 var launchers_data: Array = []
 var launcher_poll := 0.0
@@ -326,6 +327,15 @@ func _build_shell() -> void:
 	restore_dialog.confirmed.connect(func(): _request("restore-all"))
 	restore_dialog.canceled.connect(_restore_modal_focus)
 	add_child(restore_dialog)
+	decky_dialog = ConfirmationDialog.new()
+	decky_dialog.title = "Install Decky Loader?"
+	decky_dialog.dialog_text = "Decky needs your password once.\nDeckCompanion switches to Desktop Mode and opens the official installer.\nWhen it is done, tap \"Return to Gaming Mode\" on the desktop."
+	decky_dialog.ok_button_text = "Switch and install"
+	decky_dialog.cancel_button_text = "Not now"
+	decky_dialog.min_size = Vector2i(720,260)
+	decky_dialog.confirmed.connect(_start_decky_install)
+	decky_dialog.canceled.connect(_restore_modal_focus)
+	add_child(decky_dialog)
 	proton_remove_dialog = ConfirmationDialog.new()
 	proton_remove_dialog.title = "Remove Proton build?"
 	proton_remove_dialog.ok_button_text = "Remove"
@@ -365,7 +375,11 @@ func _decky_completed(_command: String, data: Dictionary) -> void:
 	if data.has("error"): notice = "Decky: " + str(data.error.message)
 	elif action == "status": decky_status = data
 	elif action == "plugin-status": plugin_status = data
-	elif action == "install": decky_handoff = data
+	elif action in ["install", "install-desktop"]:
+		decky_handoff = data
+		if data.get("switching",false): notice = "Switching to Desktop Mode. The Decky installer opens there."
+		elif data.get("launched",false): notice = "The Decky installer opened in Konsole. Enter your password there."
+		else: notice = "Open Desktop Mode to install Decky; the installer needs your password."
 	elif action == "plugin-install":
 		notice = "DeckCompanion plugin %s. Reload plugins in Decky." % ("installed" if data.get("changed",false) else "is already up to date")
 		_request_decky("plugin-status")
@@ -380,29 +394,54 @@ func _request_decky(action: String) -> void:
 
 func _decky_card(column: Node) -> void:
 	var card := _card(column,"Decky")
-	var loader_line := "Checking…"
+	var installed: bool = decky_status.get("installed",false)
+	var current := str(decky_status.get("version","")).trim_prefix("v")
+	var latest_value: Variant = decky_status.get("latest",{}).get("version")
+	var latest := str(latest_value).trim_prefix("v") if latest_value != null else ""
+	var newer := installed and latest != "" and current != "" and _version_less(current,latest)
+	var line := "Checking…"
 	if not decky_status.is_empty():
-		var latest: Variant = decky_status.get("latest",{}).get("version")
-		loader_line = ("Installed %s" % str(decky_status.get("version","")) if decky_status.get("installed",false) else "Not installed") + ("  ·  latest %s" % str(latest) if latest != null else "")
-	var loader_row := _setting_row(card,"Decky Loader",loader_line + "  ·  the plugin system for Game Mode")
-	_chip("Update" if decky_status.get("installed",false) else "Install",func(): _request_decky("install"),loader_row,"decky_install",false,MINT,not decky_backend.busy).size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	if not decky_handoff.is_empty():
-		if decky_handoff.get("launched",false): _paragraph(card,"The official installer opened in Konsole. Enter your sudo password there.",MINT)
-		else:
-			_paragraph(card,"Decky's installer needs your password, so it runs in Desktop Mode:",INK)
-			for step in decky_handoff.get("instructions",[]): _paragraph(card,"•  " + str(step))
-			var command := _label(str(decky_handoff.get("command","")),16,MINT)
-			command.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			card.add_child(command)
-	var plugin_line := "Checking…"
-	if not plugin_status.is_empty():
-		var latest_plugin: Variant = plugin_status.get("latest",{}).get("version")
-		plugin_line = ("Installed %s" % str(plugin_status.get("version","")) if plugin_status.get("installed",false) else "Not installed") + ("  ·  latest %s" % str(latest_plugin) if latest_plugin != null else "  ·  no release yet")
-	var plugin_row := _setting_row(card,"DeckCompanion in the Quick Access Menu",plugin_line)
-	var newer: bool = plugin_status.get("latest",{}).get("version") != null and plugin_status.get("version") != plugin_status.get("latest",{}).get("version")
-	if plugin_status.get("can_install",false) and (newer or not plugin_status.get("installed",false)):
-		_chip("Update" if plugin_status.get("installed",false) else "Install",func(): _request_decky("plugin-install"),plugin_row,"plugin_install",false,MINT,not decky_backend.busy).size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	for step in plugin_status.get("instructions",[]): _paragraph(card,"•  " + str(step))
+		if not installed: line = "Not installed  ·  adds plugins to the Quick Access Menu"
+		elif newer: line = "Version %s installed  ·  %s available" % [current,latest]
+		else: line = "Version %s  ·  up to date" % current if latest != "" else "Version %s installed" % current
+	var loader_row := _setting_row(card,"Decky Loader",line)
+	if not decky_status.is_empty() and (not installed or newer):
+		_chip("Update" if installed else "Install",_confirm_decky,loader_row,"decky_install",false,MINT,not decky_backend.busy).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	# The QAM plugin row appears once a plugin release exists (or it is installed).
+	var plugin_latest: Variant = plugin_status.get("latest",{}).get("version")
+	if plugin_latest != null or plugin_status.get("installed",false):
+		var plugin_line := ("Version %s installed" % str(plugin_status.get("version",""))) if plugin_status.get("installed",false) else "Not installed"
+		if plugin_latest != null and plugin_status.get("version") != plugin_latest: plugin_line += "  ·  %s available" % str(plugin_latest)
+		var plugin_row := _setting_row(card,"DeckCompanion in the Quick Access Menu",plugin_line)
+		var plugin_newer: bool = plugin_latest != null and plugin_status.get("version") != plugin_latest
+		if plugin_status.get("can_install",false) and plugin_newer:
+			_chip("Update" if plugin_status.get("installed",false) else "Install",func(): _request_decky("plugin-install"),plugin_row,"plugin_install",false,MINT,not decky_backend.busy).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		elif plugin_newer and not plugin_status.get("can_install",false):
+			_paragraph(card,"Install it from Decky's settings: Developer › Install Plugin from ZIP.",MUTED,15)
+
+static func _version_less(a: String, b: String) -> bool:
+	var pa := a.split(".")
+	var pb := b.split(".")
+	for i in maxi(pa.size(),pb.size()):
+		var x := int(pa[i]) if i < pa.size() else 0
+		var y := int(pb[i]) if i < pb.size() else 0
+		if x != y: return x < y
+	return false
+
+func _confirm_decky() -> void:
+	modal_focus = get_viewport().gui_get_focus_owner()
+	decky_dialog.popup_centered()
+	decky_dialog.get_cancel_button().grab_focus()
+
+func _start_decky_install() -> void:
+	# In Game Mode the installer must run on the desktop (it asks for your password there).
+	var game_mode: bool = OS.get_environment("XDG_CURRENT_DESKTOP").to_lower().contains("gamescope") or backend.mock
+	_request_decky("install-desktop" if game_mode else "install")
+
+## Engine instructions may be a list or one string; never iterate a string per character.
+static func _lines(value: Variant) -> Array:
+	if value is String: return [value] if not value.strip_edges().is_empty() else []
+	return value if value is Array else []
 
 func launchers_busy() -> bool:
 	return launchers_data.any(func(l): return l.get("state") == "installing")
@@ -1191,7 +1230,7 @@ func _input(event: InputEvent) -> void:
 		hints.queue_redraw()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if dialog.visible or licenses.visible or remove_dialog.visible or restore_dialog.visible or proton_remove_dialog.visible or backend.busy: return
+	if dialog.visible or licenses.visible or remove_dialog.visible or restore_dialog.visible or proton_remove_dialog.visible or decky_dialog.visible or backend.busy: return
 	if event.is_action_pressed("ui_cancel"): _back()
 	elif event.is_action_pressed("dc_left") or event.is_action_pressed("dc_right"): _switch_tab(Nav.next_index(tab,-1 if event.is_action_pressed("dc_left") else 1,3))
 	elif event.is_action_pressed("dc_x"):
