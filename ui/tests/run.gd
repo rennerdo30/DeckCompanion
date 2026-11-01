@@ -84,6 +84,8 @@ func run() -> void:
 	await ui_032(ui)
 	await ui_034(ui)
 	await settings_checks(ui)
+	await load("res://tests/layout_polish.gd").new().run(self,ui)
+	await load("res://tests/splash_hold.gd").new().run(self)
 	await touch_checks(ui)
 	# Steam Input's virtual gamepad on the Deck is not device 0.
 	for spec in [[JOY_BUTTON_A,"ui_accept"],[JOY_BUTTON_B,"ui_cancel"],[JOY_BUTTON_X,"dc_x"],[JOY_BUTTON_DPAD_DOWN,"ui_down"]]:
@@ -158,17 +160,17 @@ func ui_034(ui: Node) -> void:
 	var toggle: Control = control(ui,"splash_toggle")
 	check(toggle != null,"Settings screen has launch splash card")
 	if toggle != null:
-		check(toggle.text.ends_with(": On"),"splash defaults on in UI")
+		check(toggle.button_pressed,"splash defaults on in UI")
 		toggle.pressed.emit()
 		await create_timer(0.25).timeout
-		check(not ui.settings.splash and control(ui,"splash_toggle").text.ends_with(": Off"),"splash toggle saves and refreshes card")
+		check(not ui.settings.splash and not control(ui,"splash_toggle").button_pressed,"splash toggle saves and refreshes card")
 		control(ui,"splash_more").pressed.emit()
 		await create_timer(0.25).timeout
-		check(ui.settings.splash_seconds == 3 and not ui.settings.splash,"duration saves without losing toggle")
+		check(ui.settings.splash_seconds == 4.5 and not ui.settings.splash,"duration saves without losing toggle")
 		ui._request("settings")
 		await create_timer(0.25).timeout
 		check(ui.settings == ui.backend.mock_response("settings"),"settings round-trip via mock backend")
-		for seconds in [1,6]:
+		for seconds in [1,10]:
 			ui._request("settings",["--splash-seconds",str(seconds)])
 			await create_timer(0.25).timeout
 			check(control(ui,"splash_less" if seconds == 1 else "splash_more") == null,"duration stops at bound " + str(seconds))

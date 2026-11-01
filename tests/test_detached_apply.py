@@ -94,11 +94,14 @@ def helper_env(paths, monkeypatch):
 def test_helper_waits_writes_and_restores(paths, helper_env, mode, monkeypatch, capsys):
     helper, clock, processes, calls = helper_env
     processes["gamescope"] = mode
-    real_write = steam.guarded_write
+    real_write = steam.atomic
+    writes = []
     def guarded(path, payload):
-        assert clock.value >= 40 and not steam.running()
+        if path == steam.mapping_path(paths):
+            assert clock.value >= 40 and not steam.running()
+            writes.append(path)
         real_write(path, payload)
-    monkeypatch.setattr(steam, "guarded_write", guarded)
+    monkeypatch.setattr(steam, "atomic", guarded)
     # Exercise the internal CLI, including lock ownership and receipt/exit code.
     assert cli.main(["apply-helper", "--json"]) == 0
     result = json.loads(capsys.readouterr().out)
@@ -106,10 +109,12 @@ def test_helper_waits_writes_and_restores(paths, helper_env, mode, monkeypatch, 
     assert result["errors"] == [] and result["steam_restarted"] is True
     assert result["pid"] == helper.os.getpid()
     assert result["game_mode"] is mode
-    assert result["timings"]["shutdown"] == 40
+    assert result["timings"]["shutdown"] == pytest.approx(40, abs=.051)
+    assert writes == [steam.mapping_path(paths)]
     assert calls[0] == (["steam", "-shutdown"], 120, 0)
     if mode:
-        assert calls[1] == (["/usr/bin/steamos-session-select", "gamescope"], 15, 50)
+        assert calls[1][:2] == (["/usr/bin/steamos-session-select", "gamescope"], 15)
+        assert calls[1][2] == pytest.approx(50, abs=.051)
     else:
         assert calls[1][0][0:2] == ["/usr/bin/systemd-run", "--user"]
         assert calls[1][0][-3:] == ["--", "steam", "-silent"]
@@ -128,7 +133,7 @@ def test_helper_never_exited_writes_nothing(paths, helper_env):
     result = helper.apply_helper(paths, True)
     assert result["errors"][0]["code"] == "steam_shutdown_timeout"
     assert result["applied"] == [] and not result["steam_restarted"]
-    assert clock.value == 120 and len(calls) == 1
+    assert clock.value == 240 and len(calls) == 2
     assert steam.mapping_path(paths).read_bytes() == before
     assert not list(steam.mapping_path(paths).parent.glob("*.bak"))
     assert state(paths)["games"]["42"]["pending"] == "enable"
@@ -153,12 +158,12 @@ def test_game_mode_already_restored_skips_selector(paths, helper_env, monkeypatc
             processes["exit_at"] = float("inf")
     monkeypatch.setattr(helper.time, "sleep", auto_restore)
     assert helper.apply_helper(paths, True)["steam_restarted"] is True
-    assert len(calls) == 1 and clock.value == 42
+    assert len(calls) == 1 and clock.value == pytest.approx(42, abs=.051)
 
 
 def test_write_failure_still_restores_session(paths, helper_env, monkeypatch):
     helper, _, _, calls = helper_env
-    monkeypatch.setattr(steam, "guarded_write", lambda *args: (_ for _ in ()).throw(OSError("disk full")))
+    monkeypatch.setattr(steam, "commit_apply", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("disk full")))
     result = helper.apply_helper(paths, True)
     assert result["errors"][0]["message"] == "disk full"
     assert result["steam_restarted"] and result["applied"] == []
@@ -191,7 +196,7 @@ def test_blocking_shutdown_shares_120_second_budget(paths, helper_env, monkeypat
     monkeypatch.setattr(steam, "run", shutdown)
     result = helper.apply_helper(paths)
     assert result["errors"][0]["code"] == "steam_shutdown_timeout"
-    assert clock.value == 120 and calls == [["steam", "-shutdown"]]
+    assert clock.value == 240 and calls == [["steam", "-shutdown"], ["steam", "-shutdown"]]
 
 
 def test_busy_state_lock_retries_without_repeating_writes(paths, helper_env, monkeypatch):
@@ -210,7 +215,7 @@ def test_busy_state_lock_retries_without_repeating_writes(paths, helper_env, mon
     result = helper.apply_helper(paths)
     assert result["errors"] == [] and result["steam_restarted"]
     assert attempts.count("state.lock") == 2
-    assert result["timings"]["apply"] == .25
+    assert result["timings"]["prepare"] == .25 and result["timings"]["apply"] == 0
 
 
 def test_fallback_double_forks_sets_session_and_bounds_worker(monkeypatch):

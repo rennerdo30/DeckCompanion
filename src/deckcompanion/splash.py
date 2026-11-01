@@ -9,17 +9,20 @@ import tempfile
 from .common import now, state
 
 STARTED_PIDS = []
-DEFAULTS = {"splash": True, "splash_seconds": 2.5,
+MAX_SECONDS = 10.0
+HOLD_SECONDS = 120
+HARD_TIMEOUT = 130
+DEFAULTS = {"splash": True, "splash_seconds": 4.0,
             "show_games_without_recipe": True, "check_updates_on_start": True}
 
 
 def settings(data):
     saved = data.get("settings", {})
-    seconds = float(saved.get("splash_seconds", 2.5))
+    seconds = float(saved.get("splash_seconds", DEFAULTS["splash_seconds"]))
     if not math.isfinite(seconds):
-        seconds = 2.5
+        seconds = DEFAULTS["splash_seconds"]
     return {**saved, **{key: saved.get(key, default) for key, default in DEFAULTS.items()},
-            "splash_seconds": max(1.0, min(6.0, seconds))}
+            "splash_seconds": max(1.0, min(MAX_SECONDS, seconds))}
 
 
 def log(paths, ident, message):
@@ -56,7 +59,7 @@ def show(paths, payload, env):
                 STARTED_PIDS.append(proc.pid)
                 log(paths, ident, f"started PID {proc.pid}")
                 try:
-                    code = proc.wait(timeout=options["splash_seconds"] + 2)
+                    code = proc.wait(timeout=min(HARD_TIMEOUT, options["splash_seconds"] + HOLD_SECONDS + 2))
                 except subprocess.TimeoutExpired:
                     proc.kill()  # Only the exact subprocess created above.
                     proc.wait(timeout=2)

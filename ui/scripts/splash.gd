@@ -12,7 +12,14 @@ var auto_quit := true
 var done := false
 var loaded := false
 var elapsed := 0.0
-var duration := 2.5
+var duration := 4.0
+const HOLD_CAP := 120.0
+var held := false
+var held_elapsed := 0.0
+var skip_button: Button
+var hold_button: Button
+var countdown: Label
+var footer_note: Label
 var cache: Node
 var art: Control
 var logo: TextureRect
@@ -23,6 +30,9 @@ var mod_rows: VBoxContainer
 var warnings: Label
 var progress: ProgressBar
 var content: VBoxContainer
+var hero: PanelContainer
+var setup_panel: PanelContainer
+var columns: HBoxContainer
 var payload: Dictionary = {}
 var skip_tracking := false
 
@@ -41,59 +51,71 @@ func _ready() -> void:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 	cache = Cache.new()
 	add_child(cache)
-	art = Art.new()
-	art.cache = cache
-	art.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(art)
-	var shade := TextureRect.new()
-	var gradient := Gradient.new()
-	gradient.colors = PackedColorArray([Color("09141bf5"),Color("09141ba0")])
-	var texture := GradientTexture2D.new()
-	texture.gradient = gradient
-	texture.fill_from = Vector2(0,1)
-	texture.fill_to = Vector2(1,0)
-	shade.texture = texture
-	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(shade)
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left","right","top","bottom"]: margin.add_theme_constant_override("margin_"+side,48)
+	for side in ["left","right","top","bottom"]: margin.add_theme_constant_override("margin_"+side,32)
 	add_child(margin)
 	content = VBoxContainer.new()
-	content.add_theme_constant_override("separation",18)
+	content.add_theme_constant_override("separation",16)
 	margin.add_child(content)
 	var brand := HBoxContainer.new()
 	brand.add_theme_constant_override("separation",16)
 	content.add_child(brand)
 	logo = TextureRect.new()
-	logo.custom_minimum_size = Vector2(64,64)
+	logo.custom_minimum_size = Vector2(48,48)
 	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	brand.add_child(logo)
 	var brand_name := label("DECKCOMPANION",24,MINT)
+	brand_name.autowrap_mode = TextServer.AUTOWRAP_OFF
 	brand_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	brand.add_child(brand_name)
-	var spacer := Control.new()
-	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	content.add_child(spacer)
-	content.add_child(label("LAUNCHING WITH DECKCOMPANION",17,MINT))
-	title = label("Getting your game ready",48)
+	var tagline := label("YOUR GAME. READY TO GO.",16,MUTED)
+	tagline.autowrap_mode = TextServer.AUTOWRAP_OFF
+	brand.add_child(tagline)
+	hero = PanelContainer.new()
+	hero.clip_contents = true
+	hero.custom_minimum_size.y = 240
+	hero.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content.add_child(hero)
+	art = Art.new()
+	art.cache = cache
+	hero.add_child(art)
+	var shade := TextureRect.new()
+	var gradient := Gradient.new()
+	gradient.colors = PackedColorArray([Color("09141bf5"),Color("09141b00")])
+	var texture := GradientTexture2D.new()
+	texture.gradient = gradient
+	texture.fill_from = Vector2(0,1)
+	texture.fill_to = Vector2(0,0)
+	shade.texture = texture
+	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hero.add_child(shade)
+	var hero_margin := MarginContainer.new()
+	for side in ["left","right","top","bottom"]: hero_margin.add_theme_constant_override("margin_"+side,24)
+	hero.add_child(hero_margin)
+	var hero_text := VBoxContainer.new()
+	hero_text.alignment = BoxContainer.ALIGNMENT_END
+	hero_text.add_theme_constant_override("separation",8)
+	hero_margin.add_child(hero_text)
+	hero_text.add_child(label("LAUNCHING WITH DECKCOMPANION",15,MINT))
+	title = label("Getting your game ready",42)
 	title.max_lines_visible = 2
 	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	content.add_child(title)
-	var panel := PanelContainer.new()
+	hero_text.add_child(title)
+	setup_panel = PanelContainer.new()
 	var box := StyleBoxFlat.new()
 	box.bg_color = Color("10232eeb")
 	box.set_corner_radius_all(16)
 	box.set_content_margin_all(24)
-	panel.add_theme_stylebox_override("panel",box)
-	content.add_child(panel)
+	setup_panel.add_theme_stylebox_override("panel",box)
+	content.add_child(setup_panel)
 	var scroll := DragScroll.new()
 	scroll.scroll_started.connect(func(): skip_tracking = false)
-	scroll.custom_minimum_size.y = 240
+	scroll.custom_minimum_size.y = 180
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_child(scroll)
-	var columns := HBoxContainer.new()
+	setup_panel.add_child(scroll)
+	columns = HBoxContainer.new()
 	columns.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	columns.add_theme_constant_override("separation",32)
 	scroll.add_child(columns)
@@ -106,6 +128,9 @@ func _ready() -> void:
 	setup.add_child(proton_line)
 	fixes_line = label("",19,MUTED)
 	setup.add_child(fixes_line)
+	var divider := VSeparator.new()
+	divider.add_theme_color_override("color",Color("2c4550"))
+	columns.add_child(divider)
 	mod_rows = VBoxContainer.new()
 	mod_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mod_rows.add_theme_constant_override("separation",10)
@@ -113,7 +138,7 @@ func _ready() -> void:
 	warnings = label("",18,Color("ffcf9d"))
 	content.add_child(warnings)
 	progress = ProgressBar.new()
-	progress.custom_minimum_size.y = 5
+	progress.custom_minimum_size.y = 28
 	progress.show_percentage = false
 	for spec in [["background",Color("263c45")],["fill",MINT]]:
 		var style := StyleBoxFlat.new()
@@ -121,7 +146,22 @@ func _ready() -> void:
 		style.set_corner_radius_all(3)
 		progress.add_theme_stylebox_override(spec[0],style)
 	content.add_child(progress)
-	content.add_child(label("A / B  or touch to skip                                      Your game starts automatically",17,MUTED))
+	countdown = label("",15,INK)
+	countdown.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	countdown.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	countdown.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	progress.add_child(countdown)
+	var footer := HBoxContainer.new()
+	footer.add_theme_constant_override("separation",16)
+	content.add_child(footer)
+	footer_note = label("Your game starts automatically · B also skips",17,MUTED)
+	footer_note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	footer.add_child(footer_note)
+	skip_button = action_button("A","Skip",finish)
+	footer.add_child(skip_button)
+	hold_button = action_button("Y","Hold",hold)
+	footer.add_child(hold_button)
+	skip_button.grab_focus.call_deferred()
 	# Present the generated fallback first. Disk/texture loading starts after a frame.
 	_read_after_frame()
 
@@ -139,8 +179,15 @@ func _read_after_frame() -> void:
 
 func set_payload(data: Dictionary) -> void:
 	payload = data
-	duration = clampf(float(data.get("duration_seconds",2.5)),1,6)
+	duration = clampf(float(data.get("duration_seconds",4)),1,10)
 	elapsed = 0
+	held = false
+	held_elapsed = 0
+	done = false
+	progress.value = 0
+	skip_button.text = "Skip"
+	hold_button.show()
+	footer_note.text = "Your game starts automatically · B also skips"
 	loaded = true
 	title.text = data.get("name", "Game")
 	art.show_game(data)
@@ -163,19 +210,73 @@ func _process(delta: float) -> void:
 	if not loaded or done: return
 	if logo.texture == null and ResourceLoader.load_threaded_get_status("res://icon.svg") == ResourceLoader.THREAD_LOAD_LOADED:
 		logo.texture = ResourceLoader.load_threaded_get("res://icon.svg")
+	if held:
+		held_elapsed += delta
+		if held_elapsed >= HOLD_CAP: finish()
+		return
 	elapsed += delta
 	progress.value = minf(100,elapsed / duration * 100)
+	countdown.text = "Starting in %.1f s" % maxf(0,duration-elapsed)
 	if elapsed >= duration: finish()
 
+func action_button(glyph: String, caption: String, action: Callable) -> Button:
+	var button := Button.new()
+	button.text = caption
+	button.custom_minimum_size = Vector2(172,52)
+	button.alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	button.add_theme_font_size_override("font_size",20)
+	for state in ["normal","hover","pressed","focus"]:
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color("233e36") if state != "hover" else Color("345a45")
+		style.border_color = MINT if state == "focus" else Color("4a6a5a")
+		style.set_border_width_all(2 if state == "focus" else 1)
+		style.set_corner_radius_all(12)
+		style.content_margin_left = 58
+		style.content_margin_right = 20
+		button.add_theme_stylebox_override(state,style)
+	button.pressed.connect(action)
+	var chip := PanelContainer.new()
+	chip.position = Vector2(16,11)
+	chip.size = Vector2(30,30)
+	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var circle := StyleBoxFlat.new()
+	circle.bg_color = Color("142a24")
+	circle.border_color = MINT
+	circle.set_border_width_all(1)
+	circle.set_corner_radius_all(15)
+	chip.add_theme_stylebox_override("panel",circle)
+	button.add_child(chip)
+	var letter := label(glyph,18,MINT)
+	letter.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	letter.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	chip.add_child(letter)
+	return button
+
+func hold() -> void:
+	if done or held: return
+	held = true
+	countdown.text = "Paused"
+	skip_button.text = "Continue"
+	hold_button.hide()
+	footer_note.text = "Take a moment to review your setup · B also continues"
+	skip_button.grab_focus()
+
 func _input(event: InputEvent) -> void:
+	if (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_Y) or (event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_Y):
+		hold()
+		get_viewport().set_input_as_handled()
+		return
 	var skip: bool = event is InputEventJoypadButton and event.pressed and event.button_index in [JOY_BUTTON_A,JOY_BUTTON_B]
 	if event is InputEventScreenTouch or (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT):
-		if event.pressed: skip_tracking = true
+		var over_button: bool = skip_button.get_global_rect().has_point(event.position) or (hold_button.visible and hold_button.get_global_rect().has_point(event.position))
+		if event.pressed: skip_tracking = not held and not over_button
 		else:
-			skip = skip_tracking
+			skip = skip_tracking and not over_button
 			skip_tracking = false
 	skip = skip or event.is_action_pressed("ui_accept") or event.is_action_pressed("ui_cancel")
-	if skip: finish()
+	if skip:
+		finish()
+		get_viewport().set_input_as_handled()
 
 func finish() -> void:
 	if done: return

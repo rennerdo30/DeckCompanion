@@ -33,10 +33,10 @@ def command(*args):
 
 def test_settings_defaults_clamp_persist_and_preserve(paths):
     save_state(paths, {"games": {"42": {"mods": {"keep": False}}}, "settings": {"future": 9}})
-    assert cli.execute(command(), paths) == {"splash": True, "splash_seconds": 2.5,
+    assert cli.execute(command(), paths) == {"splash": True, "splash_seconds": 4,
         "show_games_without_recipe": True, "check_updates_on_start": True, "future": 9}
     result = cli.execute(command("--splash", "off", "--splash-seconds", "99"), paths)
-    assert result["splash"] is False and result["splash_seconds"] == 6
+    assert result["splash"] is False and result["splash_seconds"] == 10
     assert cli.execute(command(), paths)["splash"] is False
     assert cli.execute(command("--splash", "on", "--splash-seconds", "-1"), paths)["splash_seconds"] == 1
     saved = read_json(paths.data / "state.json")
@@ -79,12 +79,12 @@ def test_launch_payload_actual_preparation_and_order(paths, runtime, monkeypatch
     events, payloads, files = supervise(monkeypatch, paths)
     launch.launch(paths, "run", ["game.exe", "--space argument"])
     assert [e[0] for e in events] == ["splash", "wait", "exec"]
-    assert events[1] == ("wait", 4.5)
+    assert events[1] == ("wait", 126)
     data = payloads[0]
     assert data["name"] == "Fixture Game" and data["appid"] == "42"
     assert data["proton"] == {"name": runtime.name, "reason": "pinned"}
     assert Path(data["art"]["hero"]).is_file() and data["art"]["header"] is None
-    assert data["recipe_version"] == "1.2.3" and data["duration_seconds"] == 2.5
+    assert data["recipe_version"] == "1.2.3" and data["duration_seconds"] == 4
     assert data["fixes"] == {"upstream_chained": True, "wine_steps_count": 3,
                             "wine_steps": ["Winetricks: win7", "Registry: HKCU\\Game / Mode", "DLL: dxgi = n,b"]}
     assert data["mods"][0]["state"] == "will_install_on_launch"
@@ -166,7 +166,7 @@ def test_custom_duration_default_binary_and_summary_error_fail_open(paths, runti
     events, payloads, _ = supervise(monkeypatch, paths)
     launch.launch(paths, "run", ["game.exe"])
     assert events[0] == ("splash", str(paths.data / "bin/deckcompanion-ui"))
-    assert events[1] == ("wait", 8) and payloads[0]["duration_seconds"] == 6
+    assert events[1] == ("wait", 128) and payloads[0]["duration_seconds"] == 6
     monkeypatch.setattr(steam, "artwork", lambda *a: (_ for _ in ()).throw(OSError("bad artwork")))
     launch.launch(paths, "run", ["game.exe"])
     assert events[-1][0] == "exec"

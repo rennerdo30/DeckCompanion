@@ -1,10 +1,12 @@
 """Steam disk integration. Every write is guarded; unrelated VDF data survives."""
 import os
+import hashlib
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import zlib
 import vdf
@@ -226,22 +228,39 @@ def shortcut_identity(paths):
     return exe, unsigned
 
 
+def shortcut_value(key, value):
+    """Compare owned fields without claiming Steam's serialization or user settings."""
+    if key == "appid":
+        try:
+            return int(value) & 0xffffffff
+        except (TypeError, ValueError):
+            return None
+    if key in ("Exe", "StartDir", "icon") and isinstance(value, str):
+        if value.startswith('"') and value.endswith('"'):
+            value = value[1:-1]
+        return os.path.normpath(value) if value else ""
+    return value
+
+
 def shortcut_bytes(paths, path, remove=False):
     doc = vdf.binary_loads(path.read_bytes()) if path.exists() else {"shortcuts": {}}
     entries = list(doc.setdefault("shortcuts", {}).values())
     exe, unsigned = shortcut_identity(paths)
     ident = unsigned - 0x100000000  # Steam interprets the signed VDF int32 bits as uint32.
-    owned = lambda e: e.get("appid") == ident and e.get("Exe") == exe
+    owned = lambda e: (shortcut_value("appid", e.get("appid")) == unsigned or
+                       (e.get("AppName") == "DeckCompanion" and
+                        shortcut_value("Exe", e.get("Exe")) == shortcut_value("Exe", exe)))
     previous = next((e for e in entries if owned(e)), None)
     if not remove:
         icon = paths.data / "assets/icon.png"
         desired = {"appid": ident, "AppName": "DeckCompanion", "Exe": exe,
                         "StartDir": '"' + str(paths.data / "bin") + '"',
-                        "icon": str(icon) if icon.is_file() else "", "LaunchOptions": "",
-                        "IsHidden": 0, "AllowDesktopConfig": 1, "AllowOverlay": 1}
-        if previous and all(previous.get(k) == value for k, value in desired.items()):
+                        "icon": str(icon) if icon.is_file() else "", "LaunchOptions": ""}
+        if previous and all(shortcut_value(k, previous.get(k)) == shortcut_value(k, value)
+                            for k, value in desired.items()):
             return path.read_bytes()  # Steam-added fields, order and player tags stay intact.
-        desired = dict(previous or {"tags": {}}, **desired)
+        desired = dict(previous if previous is not None else {
+            "tags": {}, "IsHidden": 0, "AllowDesktopConfig": 1, "AllowOverlay": 1}, **desired)
         entries = [desired if owned(e) else e for e in entries] if previous else [*entries, desired]
     else:
         entries = [e for e in entries if not owned(e)]
@@ -261,14 +280,23 @@ def has_pending(data):
                 any(g.get("pending") for g in data["games"].values()))
 
 
+def mapping_matches(entry):
+    if not isinstance(entry, dict):
+        return False
+    try:
+        return (entry.get("name") == "DeckCompanion" and entry.get("config") == "" and
+                int(entry.get("priority")) == 250)
+    except (TypeError, ValueError):
+        return False
+
+
 def prune_pending(paths, data):
     """Drop writes whose managed values already match Steam's current disk state."""
     target = mappings(read_vdf(mapping_path(paths)))
-    desired = {"name": "DeckCompanion", "config": "", "priority": "250"}
-    if data.get("default_pending") == "default_on" and target.get("0") == desired:
+    if data.get("default_pending") == "default_on" and mapping_matches(target.get("0")):
         data["default_pending"] = None
     for ident, game in data["games"].items():
-        if game.get("pending") == "enable" and target.get(ident) == desired:
+        if game.get("pending") == "enable" and mapping_matches(target.get(ident)):
             if not game.get("enabled"):
                 # Unknown historical mapping must not be invented during an engine update.
                 game.setdefault("previous_mapping", None)
@@ -280,8 +308,10 @@ def prune_pending(paths, data):
     if data.get("shortcut_pending"):
         try:
             path = shortcut_path(paths)
-            data["shortcut_pending"] = any(differs(p, payload) for p, payload in
-                [(path, shortcut_bytes(paths, path)), *shortcut_artwork(paths, path)])
+            from . import net
+            data["shortcut_pending"] = (differs(path, shortcut_bytes(paths, path)) or
+                any(not p.is_file() or net.digest(p) != hashlib.sha256(payload).hexdigest()
+                    for p, payload in shortcut_artwork(paths, path)))
         except Error as exc:
             if exc.code != "steam_user_required":
                 raise  # Leave the queue for apply to resolve an account choice.
@@ -318,6 +348,15 @@ def apply(paths, restart=False):
         while running() and time.monotonic() < deadline:
             time.sleep(0.1)
         require_closed()
+    plan = prepare_apply(paths)
+    commit_apply(paths, plan)
+    if restart:
+        start()
+    return {"applied": plan["changes"], "steam_restarted": bool(restart)}
+
+
+def prepare_apply(paths):
+    """Read/serialize before shutdown so the respawn window only contains disk writes."""
     data = state(paths)
     doc = read_vdf(mapping_path(paths))
     target = mappings(doc)
@@ -366,25 +405,87 @@ def apply(paths, restart=False):
     writes = [(p, payload) for p, payload in writes if differs(p, payload)]
     originals = {p: p.read_bytes() if p.exists() else None for p, _ in writes}
     originals.update({p: p.read_bytes() for p in cleanup if p.exists()})
+    return {"writes": writes, "originals": originals, "cleanup": cleanup, "data": data,
+            "changes": changes, "mappings": {str(c.get("appid", "0")): target.get(str(c.get("appid", "0")))
+                for c in changes if c["action"] != "shortcut"},
+            "shortcut": any(c["action"] == "shortcut" for c in changes)}
+
+
+def backup_apply(plan):
+    # Stage backup bytes now; the closed-window path only renames them into place.
+    plan["backups"] = []
+    for path, payload in plan["originals"].items():
+        if payload is not None:
+            fd, name = tempfile.mkstemp(prefix=".dc-backup-", dir=path.parent)
+            os.close(fd)
+            staged = Path(name)
+            backup = path.with_name(path.name + ".deckcompanion-" + now().replace(":", "-") + ".bak")
+            plan["backups"].append((staged, backup))
+            atomic(staged, payload)
+
+
+def discard_prepared(plan):
+    for staged, _ in plan.get("backups", []):
+        staged.unlink(missing_ok=True)
+
+
+def commit_apply(paths, plan, closed_window=False):
+    """closed_window is only for the helper immediately after observing every Steam PID gone.
+
+    Its caller holds state.lock and prepared backups before shutdown. Never query processes
+    between writes on that path: SteamOS can respawn Steam in less than 200 milliseconds.
+    State is committed by that caller only after post-return semantic verification.
+    """
+    writes, originals, cleanup = (plan[k] for k in ("writes", "originals", "cleanup"))
     written = []
     try:
+        if closed_window:
+            for staged, backup in plan["backups"]:
+                os.replace(staged, backup)
         for path, payload in writes:
-            guarded_write(path, payload)
+            if closed_window:
+                atomic(path, payload)
+            else:
+                guarded_write(path, payload)
             written.append(path)
         for path in cleanup:
             if path.exists() and path.read_text(encoding="utf-8").startswith("# managed-by: DeckCompanion\n"):
-                require_closed()
+                if not closed_window: require_closed()
                 path.unlink()
                 written.append(path)
-        save_state(paths, data)
+        if not closed_window:
+            save_state(paths, plan["data"])
     except Exception:
         for path in reversed(written):
-            require_closed()
+            if not closed_window: require_closed()
             if originals[path] is None:
                 path.unlink(missing_ok=True)
             else:
                 atomic(path, originals[path])
         raise
-    if restart:
-        start()
-    return {"applied": changes, "steam_restarted": bool(restart)}
+
+
+def verify_apply(paths, plan):
+    """Steam may reserialize its files after starting; compare our managed values only."""
+    target = mappings(read_vdf(mapping_path(paths)))
+    for ident, expected in plan["mappings"].items():
+        actual = target.get(ident)
+        if expected is None:
+            if actual is not None: return False
+        else:
+            try:
+                if not isinstance(actual, dict) or any(
+                        (int(actual.get(k, -1)) != int(value) if k == "priority" else actual.get(k) != value)
+                        for k, value in expected.items()):
+                    return False
+            except (TypeError, ValueError):
+                return False
+    if plan["shortcut"]:
+        path = shortcut_path(paths)
+        if differs(path, shortcut_bytes(paths, path)): return False
+        from . import net
+        if any(not p.is_file() or net.digest(p) != hashlib.sha256(payload).hexdigest()
+               for p, payload in shortcut_artwork(paths, path)):
+            return False
+    return not any(p.exists() and p.read_text(encoding="utf-8").startswith("# managed-by: DeckCompanion\n")
+                   for p in plan["cleanup"])
