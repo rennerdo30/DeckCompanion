@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import time
 
 
 class Error(Exception):
@@ -90,24 +91,36 @@ def write_json(path, obj):
     atomic(path, json.dumps(obj, indent=2, sort_keys=True) + "\n")
 
 
+LOCK_WAIT_SECONDS = 10
+
+
 @contextmanager
 def locked(paths, name="state.lock"):
     paths.data.mkdir(parents=True, exist_ok=True)
+    # Short readers (the Decky panel polls every few seconds) also take the state
+    # lock, so writers wait briefly instead of failing at once. Other locks stay
+    # non-blocking: a running Proton job is reported as busy immediately.
+    wait = LOCK_WAIT_SECONDS if name == "state.lock" else 0
+    deadline = time.monotonic() + wait
     with (paths.data / name).open("a+b") as lock:
-        try:
-            if os.name == "nt":
-                import msvcrt
-                lock.seek(0)
-                if not lock.read(1):
-                    lock.write(b"0")
-                    lock.flush()
-                lock.seek(0)
-                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
-            raise Error("busy", "Another DeckCompanion command is writing state") from exc
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    lock.seek(0)
+                    if not lock.read(1):
+                        lock.write(b"0")
+                        lock.flush()
+                    lock.seek(0)
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if time.monotonic() >= deadline:
+                    raise Error("busy", "Another DeckCompanion command is writing state") from exc
+                time.sleep(0.1)
         try:
             yield
         finally:

@@ -328,3 +328,32 @@ def test_gamescope_wl_counts_as_game_mode(tmp_path, monkeypatch):
     real_path = apply_helper.Path
     monkeypatch.setattr(apply_helper, "Path", lambda p: proc if p == "/proc" else real_path(p))
     assert apply_helper.gamescope_running()
+
+
+def test_state_lock_waits_for_a_short_reader(paths, monkeypatch):
+    """The Decky panel polls with short state reads; writers wait instead of failing."""
+    import threading
+    from deckcompanion import common
+    monkeypatch.setattr(common, "LOCK_WAIT_SECONDS", 3)
+    held, release = threading.Event(), threading.Event()
+    def reader():
+        with common.locked(paths):
+            held.set()
+            release.wait(5)
+    thread = threading.Thread(target=reader)
+    thread.start()
+    held.wait(5)
+    threading.Timer(0.4, release.set).start()
+    with common.locked(paths):  # acquired once the reader finishes, no "busy"
+        pass
+    thread.join(5)
+    monkeypatch.setattr(common, "LOCK_WAIT_SECONDS", 0.2)
+    release.clear(); held.clear()
+    thread = threading.Thread(target=reader)
+    thread.start()
+    held.wait(5)
+    with pytest.raises(common.Error):
+        with common.locked(paths):
+            pass
+    release.set()
+    thread.join(5)
