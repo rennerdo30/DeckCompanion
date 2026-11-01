@@ -116,6 +116,8 @@ def parser():
             group.add_argument("--off", action="store_true")
         if name == "apply":
             sub.add_argument("--restart-steam", action="store_true")
+            # Used by install.sh: only the installer's own shortcut/default changes.
+            sub.add_argument("--installer-only", action="store_true")
         if name == "settings":
             sub.add_argument("--splash", choices=("on", "off"))
             sub.add_argument("--splash-seconds", type=float)
@@ -127,6 +129,7 @@ def parser():
     helper = commands.add_parser("apply-helper", help="internal detached Steam apply worker")
     helper.add_argument("--json", action="store_true")
     helper.add_argument("--game-mode", action="store_true")
+    helper.add_argument("--installer-only", action="store_true")
     commands.choices["update"].add_argument("--detach", action="store_true")
     proton = commands.add_parser("proton")
     proton.add_argument("action", nargs="?", choices=("install", "available", "remove"))
@@ -349,9 +352,11 @@ def execute(args, paths):
             result["mod_result"] = {"changed_now": args.mod_id in changed, "message": mod["state_message"]}
         return result
     if name == "apply":
-        return steam.apply(paths, args.restart_steam)
+        return steam.apply(paths, args.restart_steam, installer_only=args.installer_only)
     if name == "default":
         data["default_pending"] = "default_on" if args.on else "default_off"
+        data.pop("default_pending_by", None)
+        data["default_initialized"] = True
         save_state(paths, data)
     if name in ("status", "default"):
         from .decky import shortcut
@@ -394,17 +399,17 @@ def main(argv=None):
                 takeover.reconcile(paths, data, uninstall=data.get("uninstalling", False))
                 steam.prune_pending(paths, data)
                 save_state(paths, data)
-                pending = steam.has_pending(data)
+                pending = steam.has_pending(data, installer_only=args.installer_only)
             if not pending:
                 print(json.dumps({"applied": [], "steam_restarted": False}))
                 return 0
         if args.command == "apply-helper":
             from .apply_helper import apply_helper
-            result = apply_helper(paths, args.game_mode)
+            result = apply_helper(paths, args.game_mode, installer_only=args.installer_only)
         elif args.command == "apply" and args.restart_steam and sys.platform.startswith("linux") and steam.running():
             # Never hold state.lock while starting a helper which will need it.
             from .apply_helper import schedule
-            result = schedule(paths)
+            result = schedule(paths, installer_only=args.installer_only)
         elif args.command in ("proton", "proton-helper", "update", "launchers", "launcher", "launcher-helper"):
             result = execute(args, paths)
         else:

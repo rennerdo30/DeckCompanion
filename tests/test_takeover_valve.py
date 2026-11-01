@@ -258,7 +258,7 @@ def test_takeover_uses_detached_apply_retry_and_restores_original(paths, library
     scheduled = []
     monkeypatch.setattr(cli.sys, "platform", "linux")
     monkeypatch.setattr(steam, "running", lambda: True)
-    monkeypatch.setattr(helper, "schedule", lambda p: scheduled.append(state(p)) or {"scheduled": True})
+    monkeypatch.setattr(helper, "schedule", lambda p, installer_only=False: scheduled.append(state(p)) or {"scheduled": True})
     assert cli.main(["apply", "--restart-steam", "--json"]) == 0
     capsys.readouterr()
     assert scheduled[0]["games"]["51"]["pending"] == "enable"

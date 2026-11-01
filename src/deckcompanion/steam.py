@@ -480,7 +480,10 @@ def differs(path, payload):
     return not path.is_file() or path.read_bytes() != payload
 
 
-def has_pending(data):
+def has_pending(data, installer_only=False):
+    if installer_only:
+        return bool(data.get("shortcut_pending") or
+                    (data.get("default_pending") and data.get("default_pending_by") == "installer"))
     return bool(data.get("restore_pending") or data.get("default_pending") or data.get("shortcut_pending") or
                 any(g.get("pending") for g in data.get("non_steam", {}).values()) or
                 any(g.get("pending") for g in data["games"].values()))
@@ -616,27 +619,30 @@ def guarded_write(path, payload):
     atomic(path, payload)
 
 
-def apply(paths, restart=False):
+def apply(paths, restart=False, installer_only=False):
     if running():
         if not restart:
             raise Error("steam_running", "Use apply --restart-steam or close Steam first")
         if sys.platform.startswith("linux"):
             from . import apply_helper
-            return apply_helper.schedule(paths)
+            return apply_helper.schedule(paths, installer_only)
         run(["steam", "-shutdown"], 10)
         deadline = time.monotonic() + 10
         while running() and time.monotonic() < deadline:
             time.sleep(0.1)
         require_closed()
-    plan = prepare_apply(paths)
+    plan = prepare_apply(paths, installer_only)
     commit_apply(paths, plan)
     if restart:
         start()
     return {"applied": plan["changes"], "steam_restarted": bool(restart)}
 
 
-def prepare_apply(paths):
-    """Read/serialize before shutdown so the respawn window only contains disk writes."""
+def prepare_apply(paths, installer_only=False):
+    """Read/serialize before shutdown so the respawn window only contains disk writes.
+
+    installer_only: apply just the installer's own shortcut and first-install default;
+    the user's queued changes stay pending for their Apply."""
     data = state(paths)
     from . import takeover
     takeover.reconcile(paths, data, uninstall=data.get("uninstalling", False))
@@ -646,7 +652,10 @@ def prepare_apply(paths):
     target = mappings(doc)
     changes, cleanup, deletes = [], [], []
     pending = data.get("default_pending")
+    if installer_only and data.get("default_pending_by") != "installer":
+        pending = None
     if pending:
+        data.pop("default_pending_by", None)
         if pending == "default_on":
             takeover.capture(data, "0", target)
             if target.get("0", {}).get("name") != "DeckCompanion":
@@ -662,7 +671,7 @@ def prepare_apply(paths):
         changes.append({"action": pending})
     for ident, game in data["games"].items():
         pending = game.get("pending")
-        if not pending:
+        if not pending or installer_only:
             continue
         if pending == "enable":
             takeover.capture(data, "0", target)
@@ -682,7 +691,7 @@ def prepare_apply(paths):
             game["takeover_snapshot"] = False
         game.update(enabled=pending == "enable", pending=None)
         changes.append({"appid": ident, "action": pending})
-    for change in takeover.restore_pending(data):
+    for change in ([] if installer_only else takeover.restore_pending(data)):
         ident = change.get("appid", "0")
         previous = data["takeover_snapshot"]["entries"][ident]
         if previous is None:
@@ -694,7 +703,8 @@ def prepare_apply(paths):
             data["games"].setdefault(ident, {}).update(enabled=False, pending=None,
                 takeover_managed=False, takeover_snapshot=False)
         changes.append(change)
-    data["restore_pending"] = []
+    if not installer_only:
+        data["restore_pending"] = []
     writes = []
     if data.get("shortcut_pending"):
         path = shortcut_path(paths)
@@ -712,7 +722,7 @@ def prepare_apply(paths):
         changes.append({"action": "shortcut"})
     if changes:
         writes.append((mapping_path(paths), vdf.dumps(doc, pretty=True).encode()))
-    pending_games = [g for g in data.get("non_steam", {}).values() if g.get("pending")]
+    pending_games = [] if installer_only else [g for g in data.get("non_steam", {}).values() if g.get("pending")]
     if pending_games:
         from .nonsteam import shortcut_bytes as game_shortcut_bytes, shortcut_artwork as game_shortcut_artwork
         path = shortcut_path(paths)

@@ -65,7 +65,7 @@ def test_nonsteam_queue_uses_detached_apply(paths, ns, tmp_path, monkeypatch, ca
     monkeypatch.setattr(steam, "running", lambda: True)
     monkeypatch.setattr(cli.sys, "platform", "linux")
     calls = []
-    monkeypatch.setattr(apply_helper, "schedule", lambda p: calls.append(p) or {"scheduled": True})
+    monkeypatch.setattr(apply_helper, "schedule", lambda p, installer_only=False: calls.append(p) or {"scheduled": True})
     assert cli.main(["apply", "--restart-steam", "--json"]) == 0
     assert calls == [paths] and '"scheduled": true' in capsys.readouterr().out
     assert state(paths)["non_steam"]["example"]["pending"] == "add"

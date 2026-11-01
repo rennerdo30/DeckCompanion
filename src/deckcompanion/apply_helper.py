@@ -33,7 +33,7 @@ def unit_name():
     return "deckcompanion-apply-" + str(time.time_ns())
 
 
-def helper_command(paths):
+def helper_command(paths, installer_only=False):
     # Pin this engine, not the mutable current pointer; also works from a checkout
     # after systemd discards cwd/PYTHONPATH. Forward only the documented roots/user.
     root = Path(__file__).resolve().parents[2]
@@ -45,7 +45,8 @@ def helper_command(paths):
     bootstrap = (f"import os,sys;os.environ.update({env!r});"
                  f"sys.path[:0]={[str(root / 'src'), str(root)]!r};"
                  "from deckcompanion.cli import main;sys.exit(main())")
-    return [sys.executable, "-c", bootstrap, "apply-helper", *(["--game-mode"] if game_mode() else [])]
+    return [sys.executable, "-c", bootstrap, "apply-helper", *(["--game-mode"] if game_mode() else []),
+            *(["--installer-only"] if installer_only else [])]
 
 
 def double_fork(command):
@@ -80,9 +81,9 @@ def double_fork(command):
         os._exit(0)
 
 
-def schedule(paths):
+def schedule(paths, installer_only=False):
     unit = unit_name()
-    command = helper_command(paths)
+    command = helper_command(paths, installer_only)
     runner = shutil.which("systemd-run")
     if runner:
         # A present but failing user manager is an error, never a silent fallback.
@@ -132,7 +133,7 @@ def restore(mode):
 
 
 @contextmanager
-def pending_plan(paths):
+def pending_plan(paths, installer_only=False):
     # Acquire and serialize before Steam exits, never inside its short respawn window.
     deadline = time.monotonic() + 10
     while True:
@@ -145,13 +146,13 @@ def pending_plan(paths):
             time.sleep(0.25)
             continue
         try:
-            yield steam.prepare_apply(paths)
+            yield steam.prepare_apply(paths, installer_only)
             return
         finally:
             with_lock.__exit__(None, None, None)
 
 
-def apply_helper(paths, was_game_mode=False):
+def apply_helper(paths, was_game_mode=False, installer_only=False):
     # Losers must not shut down Steam or overwrite the active helper's receipt.
     with locked(paths, "apply.lock"):
         started = time.monotonic()
@@ -168,7 +169,7 @@ def apply_helper(paths, was_game_mode=False):
         try:
             result["game_mode"] = was_game_mode or game_mode()
             phase = time.monotonic()
-            with pending_plan(paths) as initial:
+            with pending_plan(paths, installer_only) as initial:
                 result["timings"]["prepare"] = time.monotonic() - phase
                 result.update(attempts=0, verified=False)
                 result["steam_change_reasons"] = initial["steam_change_reasons"]
@@ -181,7 +182,7 @@ def apply_helper(paths, was_game_mode=False):
                     result["attempts"] = attempt + 1
                     # Refresh Steam's unrelated fields after a failed verification, retaining
                     # the original previous-mapping restoration metadata until acceptance.
-                    plan = initial if attempt == 0 else steam.prepare_apply(paths)
+                    plan = initial if attempt == 0 else steam.prepare_apply(paths, installer_only)
                     plan["data"] = initial["data"]
                     prepared.append(plan)
                     steam.backup_apply(plan)

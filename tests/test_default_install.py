@@ -337,3 +337,30 @@ def test_native_programs_bypass_proton(paths, tmp_path, monkeypatch):
     launch.launch(paths, "getcompatpath", [str(elf)])
     assert calls == [(str(elf), [str(elf), "--flag"]), (str(script), [str(script)])]
     assert launch.native([str(exe)]) is False and launch.native([]) is False
+
+
+def test_installer_applies_only_its_own_changes(paths, source, monkeypatch, capsys):
+    """Owner 2026-11-02: an install or update must not apply the user's queued changes,
+    and only the first install makes DeckCompanion Steam's default."""
+    monkeypatch.setattr(steam, "running", lambda: False)
+    doc = {}
+    steam.mappings(doc)["0"] = {"name": "proton_experimental", "config": "", "priority": "75"}
+    atomic(steam.mapping_path(paths), vdf.dumps(doc))
+    install.install(paths, source)
+    data = state(paths)
+    assert data["default_pending"] == "default_on" and data["default_pending_by"] == "installer"
+    # A user change queued before the installer's apply stays queued.
+    data["games"]["4634560"] = {"pending": "enable"}
+    save_state(paths, data)
+    result = steam.apply(paths, installer_only=True)
+    applied = [c.get("action") for c in result["applied"]]
+    assert "default_on" in applied and "enable" not in applied
+    assert state(paths)["games"]["4634560"]["pending"] == "enable"
+    assert steam.has_pending(state(paths)) and not steam.has_pending(state(paths), installer_only=True)
+    # The user turns the default off; an update must not turn it back on.
+    code, _ = call(capsys, "default", "--off")
+    assert code == 0
+    steam.apply(paths)
+    install.install(paths, source)
+    assert state(paths).get("default_pending") is None
+    assert steam.mappings(steam.read_vdf(steam.mapping_path(paths)))["0"]["name"] == "proton_experimental"

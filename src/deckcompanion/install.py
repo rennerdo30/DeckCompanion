@@ -87,7 +87,13 @@ def install(paths, source):
         owned_write(paths.data / "bin/deckcompanion-ui", ui_stub, 0o755)
         (target / "bin/deckcompanion-ui").chmod(0o755)
         data["shortcut_pending"] = True
-    data["default_pending"] = "default_on"
+    # Only the first install makes DeckCompanion Steam's default; updates never
+    # override a user's later choice (owner, 2026-11-02).
+    if not data.get("default_initialized"):
+        data["default_initialized"] = True
+        if not data.get("default_pending"):
+            data["default_pending"] = "default_on"
+            data["default_pending_by"] = "installer"
     if index is not None:
         write_json(paths.cache / "engine-index.json", dict(index, fetched_at=now()))
         merged = recipes.merge_index(read_json(paths.cache / "index.json"), index)
