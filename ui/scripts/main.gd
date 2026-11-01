@@ -742,6 +742,7 @@ func _pending_lines() -> Array:
 	for item in status.get("pending",[]):
 		var game: Dictionary = names.get(str(item.get("appid",item.get("slug",""))),{})
 		var title := str(game.get("name","App " + str(item.get("appid",item.get("slug","")))))
+		if title.length() > 42: title = title.left(40) + "…"
 		var before := str(game.get("previous_mapping","")) if game.get("previous_mapping") != null else ""
 		match str(item.get("action","")):
 			"enable": lines.append("%s: run through DeckCompanion" % title)
