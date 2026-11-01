@@ -13,7 +13,7 @@ var restore_dialog: ConfirmationDialog
 var proton_remove_dialog: ConfirmationDialog
 var pending_proton_remove := ""
 var available_data: Dictionary = {}
-const UI_VERSION := "0.4.3"
+const UI_VERSION := "0.4.4"
 # Design tokens (shared with the logo and Steam artwork palette).
 const INK := Color("e7f1f4")
 const MUTED := Color("8fa6b2")
