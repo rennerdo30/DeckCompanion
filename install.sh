@@ -89,8 +89,8 @@ with tempfile.TemporaryDirectory(prefix='deckcompanion-install-') as temp:
     run([sys.executable, '-m', 'deckcompanion', 'install', '--source', str(root), *sys.argv[1:]], env)
     # Pin apply to the installed payload, never the temporary directory being removed.
     data = pathlib.Path(os.environ.get('DECKCOMPANION_HOME', str(pathlib.Path(os.environ.get('XDG_DATA_HOME', str(pathlib.Path.home() / '.local/share'))) / 'deckcompanion')))
-    print('DeckCompanion: applying Steam changes; Steam will restart once if running.', flush=True)
-    run([str(data / 'bin/deckcompanion'), 'apply', '--restart-steam', '--json'], os.environ.copy())
+    print('DeckCompanion: applying its own Steam changes (your queued changes wait for Apply); Steam restarts only if needed.', flush=True)
+    run([str(data / 'bin/deckcompanion'), 'apply', '--restart-steam', '--installer-only', '--json'], os.environ.copy())
     print('DeckCompanion: install complete. A scheduled apply continues independently; check status --json for last_apply.', flush=True)
     raise SystemExit(0)
 PY
@@ -98,7 +98,7 @@ else
   printf '%s\n' 'DeckCompanion: installing engine; Steam may stay running.'
   PYTHONPATH="$root/src:$root" timeout 60s python3 -m deckcompanion install --source "$root" "$@"
   cli="${DECKCOMPANION_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/deckcompanion}/bin/deckcompanion"
-  printf '%s\n' 'DeckCompanion: applying Steam changes; Steam will restart once if running.'
-  timeout 30s "$cli" apply --restart-steam --json
+  printf '%s\n' 'DeckCompanion: applying its own Steam changes (your queued changes wait for Apply); Steam restarts only if needed.'
+  timeout 30s "$cli" apply --restart-steam --installer-only --json
   printf '%s\n' 'DeckCompanion: install complete. Check status --json for the detached apply result.'
 fi
