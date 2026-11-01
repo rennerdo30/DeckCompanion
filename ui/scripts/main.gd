@@ -1,8 +1,10 @@
 extends Control
 const Backend = preload("res://scripts/backend.gd")
 const Nav = preload("res://scripts/navigation.gd")
-const Landscape = preload("res://scripts/landscape.gd")
 const Hints = preload("res://scripts/hints.gd")
+const ArtCache = preload("res://scripts/art_cache.gd")
+const GameArt = preload("res://scripts/game_art.gd")
+const Text = preload("res://scripts/game_text.gd")
 const INK := Color("e7f1f4")
 const MUTED := Color("9ab0bc")
 const MINT := Color("b8f18b")
@@ -29,13 +31,30 @@ var log_view: ScrollContainer
 var dialog: ConfirmationDialog
 var last_focus := ""
 var modal_focus: Control
+var art_cache: Node
+var preview: VBoxContainer
+var preview_art: Control
+var preview_fields: Dictionary = {}
+var preview_id := ""
+var focused_game := ""
+var preview_scroll: ScrollContainer
+var preview_backend: Node
+var preview_note_id := ""
+var preview_notes: Dictionary = {}
 
 func _ready() -> void:
 	_setup_actions()
 	_make_theme()
+	art_cache = ArtCache.new()
+	add_child(art_cache)
 	backend = Backend.new()
 	add_child(backend)
 	backend.completed.connect(_completed)
+	# The list contract does not include notes on older engines. Read detail separately
+	# without locking navigation or rebuilding the panel while focus moves.
+	preview_backend = Backend.new()
+	add_child(preview_backend)
+	preview_backend.completed.connect(_preview_completed)
 	_build_shell()
 	_refresh()
 	_capture_if_requested()
@@ -192,6 +211,7 @@ func _completed(command: String, data: Dictionary) -> void:
 		match command:
 			"games":
 				games = data.games
+				preview_notes.clear()
 				if detail:
 					for game in games:
 						if game.appid == selected.get("appid"): selected.merge(game,true)
@@ -206,7 +226,7 @@ func _completed(command: String, data: Dictionary) -> void:
 				selected.merge(data,true)
 				for i in games.size():
 					if games[i].appid == data.appid: games[i] = data
-				notice = "Change saved. Apply when you’re ready."
+				notice = Text.mod_message(data) if command == "mod" else "Change saved. Apply when you’re ready."
 				_request("status")
 				return
 			"update":
@@ -222,6 +242,10 @@ func _completed(command: String, data: Dictionary) -> void:
 	_render()
 
 func _render() -> void:
+	preview = null
+	preview_scroll = null
+	preview_fields.clear()
+	preview_id = ""
 	for node in body.get_children():
 		body.remove_child(node)
 		node.queue_free()
@@ -248,6 +272,7 @@ func _render() -> void:
 	if not apply_button.disabled: controls.append(apply_button)
 	hints.keyboard = keyboard
 	hints.detail = detail
+	hints.library_preview = is_instance_valid(preview)
 	hints.queue_redraw()
 	Nav.wire(controls)
 	_restore_focus.call_deferred()
@@ -268,7 +293,7 @@ func _games_screen() -> void:
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_stretch_ratio = 1.65
+	scroll.size_flags_stretch_ratio = 1.2
 	scroll.follow_focus = true
 	split.add_child(scroll)
 	var list := VBoxContainer.new()
@@ -278,25 +303,81 @@ func _games_screen() -> void:
 		_paragraph(list,"No games match this filter." if not games.is_empty() else "Your library is waiting. Install a Steam game, then refresh.")
 		_button("Refresh library",_refresh,list,"refresh")
 	for game in visible:
-		var state := "Pending " + str(game.pending) if game.get("pending") != null else ("Enabled" if game.enabled else "Not enabled")
-		if game.get("pending") == null and status.get("pending",[]).any(func(p): return p is Dictionary and p.get("appid") == game.appid): state += " · Pending mods"
+		var state := Text.fix(game)
 		var launch: Variant = game.get("last_launch")
-		var result := "Not launched" if launch == null else ("Last launch OK" if launch.get("ok",false) else "Last launch failed")
-		var text: String = game.name + "\n" + ("Recipe " + str(game.get("recipe_version","")) if game.has_recipe else "No recipe available") + "   ·   " + state + "   ·   " + result
+		var result := "Not launched" if launch == null else ("Last handoff OK" if launch.get("ok",false) else "Preparation failed")
+		var summary: String = "Recipe " + str(game.get("recipe_version","")) + "   ·   " + state if game.has_recipe else state
+		var text: String = game.name + "\n" + summary + "   ·   " + result
 		var button := _button(text,_open_game.bind(game),list,game.appid)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		button.add_theme_font_size_override("font_size",18)
 		button.custom_minimum_size.y = 92
-	var feature := _card(split)
-	feature.get_parent().size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var art := Landscape.new()
-	art.custom_minimum_size.y = 150
-	art.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	feature.add_child(art)
-	feature.add_child(_label("MADE FOR THE HANDHELD",14,MINT))
-	feature.add_child(_label("Less setup.\nMore play.",32))
-	_paragraph(feature,"Browse community recipes, choose your mods, and get back to your games.")
+		button.focus_entered.connect(_focus_game.bind(game))
+		button.mouse_entered.connect(_focus_game.bind(game))
+	preview = _card(split)
+	preview.get_parent().size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Clip/scroll long notes and mod lists inside the panel, keeping the footer fixed.
+	preview_scroll = ScrollContainer.new()
+	preview_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	preview.add_child(preview_scroll)
+	var content := VBoxContainer.new()
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_theme_constant_override("separation",8)
+	preview_scroll.add_child(content)
+	preview_art = _banner(content, 150)
+	for spec in [["name",27,INK],["fix",18,MINT],["proton",18,INK],["mods",18,INK],["launch",16,MUTED],["note",18,MUTED]]:
+		var label := _label("",spec[1],spec[2])
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		content.add_child(label)
+		preview_fields[spec[0]] = label
+	if games.is_empty():
+		preview_fields.name.text = "Less setup. More play."
+		preview_fields.note.text = "Install a Steam game, then refresh your library."
+	elif visible.is_empty():
+		preview_fields.name.text = "No matching games"
+		preview_fields.note.text = "Try another library filter."
+	else:
+		var initial: Dictionary = visible[0]
+		for game in visible:
+			if game.appid == focused_game: initial = game
+		_focus_game(initial)
+
+func _banner(parent: Node, height: int) -> Control:
+	var art := GameArt.new()
+	art.cache = art_cache
+	art.custom_minimum_size.y = height
+	parent.add_child(art)
+	return art
+
+func _focus_game(game: Dictionary) -> void:
+	focused_game = game.appid
+	if not is_instance_valid(preview) or preview_id == game.appid: return
+	preview_id = game.appid
+	preview_scroll.scroll_vertical = 0
+	preview_art.show_game(game)
+	preview_fields.name.text = game.name
+	preview_fields.fix.text = Text.fix(game)
+	preview_fields.proton.text = Text.proton(game)
+	preview_fields.mods.text = "\n".join(game.mods.map(func(mod): return Text.mod_label(mod))) if not game.mods.is_empty() else "No optional mods"
+	preview_fields.launch.text = Text.launch(game)
+	preview_fields.note.text = Text.note(game)
+	_load_preview_note()
+
+func _load_preview_note() -> void:
+	if not is_instance_valid(preview) or preview_id.is_empty(): return
+	for game in games:
+		if game.appid != preview_id: continue
+		if game.get("notes") is String: return
+		preview_fields.note.text = preview_notes.get(preview_id,"Loading recipe notes…")
+		if not preview_notes.has(preview_id) and not preview_backend.busy:
+			preview_note_id = preview_id
+			preview_backend.request("game",[preview_id])
+
+func _preview_completed(_command: String, data: Dictionary) -> void:
+	preview_notes[preview_note_id] = "Recipe notes unavailable." if data.has("error") else Text.note(data)
+	if preview_notes.size() > 8: preview_notes.erase(preview_notes.keys()[0])
+	_load_preview_note()
 
 func _open_game(game: Dictionary) -> void:
 	selected = game
@@ -321,15 +402,17 @@ func _detail_screen() -> void:
 	var column := VBoxContainer.new()
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(column)
+	var banner := _banner(column, 170)
+	banner.show_game(selected)
+	_paragraph(column,Text.fix(selected) + "  ·  " + Text.proton(selected),MINT)
 	var mods := _card(column)
 	mods.add_child(_label("Mods & recipe",23))
 	if selected.mods.is_empty(): _paragraph(mods,"No optional mods in this recipe." if selected.has_recipe else "A recipe isn’t available yet. Steam will launch this game normally.")
 	for mod in selected.mods:
-		var version: String = "latest" if mod.version == "unresolved" else (mod.version if mod.version.begins_with("v") else "v" + mod.version)
-		var installed: String = "Not installed yet" if mod.get("installed_version") == null else "Installed " + (str(mod.installed_version) if str(mod.installed_version).begins_with("v") else "v" + str(mod.installed_version))
-		var state: String = ("On  ·  " if mod.enabled else "Off  ·  ") + installed
-		var mod_button := _button(("✓   " if mod.enabled else "○   ") + mod.name + "   " + version + "      " + state,_toggle_mod.bind(mod),mods,"mod"+mod.id)
+		var mod_button := _button(Text.mod_label(mod),_toggle_mod.bind(mod),mods,"mod"+mod.id)
 		mod_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		mod_button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		mod_button.add_theme_font_size_override("font_size",19)
 	var notes := _card(column)
 	notes.add_child(_label("Recipe notes",23))
 	_paragraph(notes,str(selected.get("notes","Loading recipe notes…")))
@@ -428,14 +511,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 func _process(delta: float) -> void:
-	if is_instance_valid(log_view) and not dialog.visible:
+	var scroll: ScrollContainer = log_view if detail else preview_scroll
+	if is_instance_valid(scroll) and not dialog.visible:
 		var axis := 0.0
 		for device in Input.get_connected_joypads():
 			var value := Input.get_joy_axis(device,JOY_AXIS_RIGHT_Y)
 			if absf(value) > absf(axis): axis = value
 		if Input.is_physical_key_pressed(KEY_PAGEDOWN): axis = 1.0
 		if Input.is_physical_key_pressed(KEY_PAGEUP): axis = -1.0
-		if absf(axis) > 0.25: log_view.scroll_vertical += int(axis*420*delta)
+		if absf(axis) > 0.25: scroll.scroll_vertical += int(axis*420*delta)
 
 func _capture_if_requested() -> void:
 	var directory := ""
@@ -444,6 +528,10 @@ func _capture_if_requested() -> void:
 	if directory.is_empty() or not backend.mock: return
 	DirAccess.make_dir_recursive_absolute(directory)
 	for screen in ["games","detail","updates"]:
+		if screen == "games":
+			await get_tree().create_timer(0.6).timeout
+			for control in controls:
+				if control.get_meta("focus_id","") == games[0].appid: control.grab_focus()
 		if screen == "detail": _open_game(games[0])
 		if screen == "updates":
 			_switch_tab(1)

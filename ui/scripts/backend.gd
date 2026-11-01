@@ -4,7 +4,6 @@ var mock := false
 var scenario := ""
 var busy := false
 var games: Array = []
-var mod_pending: Dictionary = {}
 var default_tool := false
 var default_pending = null
 var worker: Thread
@@ -18,7 +17,14 @@ func _ready() -> void:
 	set_process(false)
 
 static func fixture(name: String) -> Dictionary:
-	return JSON.parse_string(FileAccess.get_file_as_string("res://fixtures/%s.json" % name))
+	var data: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://fixtures/%s.json" % name))
+	for game in data.get("games", []):
+		if game.get("art") is Dictionary:
+			for kind in game.art:
+				if game.art[kind] is String:
+					var absolute := ProjectSettings.globalize_path(game.art[kind])
+					if FileAccess.file_exists(absolute): game.art[kind] = absolute
+	return data
 
 static func failure(code: String, message: String) -> Dictionary:
 	return {"error": {"code": code, "message": message}}
@@ -127,19 +133,17 @@ func mock_response(command: String, args: Array = []) -> Dictionary:
 		return mock_response("status")
 	if command == "status":
 		var result := fixture("status")
-		result.pending = games.filter(func(g): return g.get("pending") != null or mod_pending.has(g.appid)).map(func(g): return {"appid": g.appid})
+		result.pending = games.filter(func(g): return g.get("pending") != null).map(func(g): return {"appid": g.appid})
 		if default_pending != null: result.pending.append({"action": default_pending})
 		result.default_tool = default_tool
 		return result
 	if command == "apply":
 		var applied: Array = []
 		for game in games:
-			if game.pending != null or mod_pending.has(game.appid):
+			if game.pending != null:
 				applied.append(game.appid)
 				if game.pending != null: game.enabled = game.pending == "enable"
 				game.pending = null
-				for mod in game.mods: mod.installed_version = mod.version if mod.enabled else null
-		mod_pending.clear()
 		if default_pending != null:
 			default_tool = default_pending == "default_on"
 			applied.append(default_pending)
@@ -154,6 +158,10 @@ func mock_response(command: String, args: Array = []) -> Dictionary:
 			for mod in game.mods:
 				if mod.id == args[1]:
 					mod.enabled = args[2] == "--on"
-					mod_pending[game.appid] = true
+					mod.state = "will_install_on_launch" if mod.enabled else "off"
+					mod.state_message = "Will install on next launch" if mod.enabled else "Mod turned off. Takes effect on next launch."
+					var response: Dictionary = game.duplicate(true)
+					response.mod_result = {"changed_now": false, "message": mod.state_message}
+					return response
 		return game.duplicate(true)
 	return failure("NOT_FOUND", "This game is no longer installed. Refresh your library.")
