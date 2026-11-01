@@ -2,12 +2,14 @@
 """Build locally only. Online mode pins release assets; --offline leaves them unresolved."""
 import argparse
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import sys
 import tarfile
 import tempfile
+import time
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,10 +91,17 @@ def build(output, version=__version__, offline=False):
                 if info.name in ("compat/DeckCompanion", "bin/deckcompanion-ui", "install.sh", "uninstall.sh", "DeckCompanion-Installer.desktop"):
                     info.mode = 0o755
                 return info
-            for name in ("src", "vdf", "recipes", "compat", "docs", "LICENSE", "THIRD_PARTY_NOTICES.md", "compatibilitytool.vdf", "toolmanifest.vdf", "install.sh", "uninstall.sh", "DeckCompanion-Installer.desktop"):
+            for name in ("src", "vdf", "compat", "docs", "LICENSE", "THIRD_PARTY_NOTICES.md", "compatibilitytool.vdf", "toolmanifest.vdf", "install.sh", "uninstall.sh", "DeckCompanion-Installer.desktop"):
                 source = ROOT / name
                 if source.exists():
                     tar.add(source, arcname=name, filter=include)
+            # Bundle the resolved recipes (pinned URLs and SHA256), the same text as the index:
+            # a newer bundled recipe replaces the cache, so it must stay installable (Deck, 2026-11-01).
+            for ident, entry in sorted(entries.items()):
+                payload = entry["toml"].encode("utf-8")
+                info = tarfile.TarInfo(f"recipes/{ident}.toml")
+                info.size, info.mode, info.mtime = len(payload), 0o644, int(time.time())
+                tar.addfile(info, io.BytesIO(payload))
             # The UI child can export this release payload; never build or modify ui/ here.
             ui = ROOT / "bin/deckcompanion-ui"
             if ui.is_file():

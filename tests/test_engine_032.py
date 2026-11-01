@@ -353,16 +353,30 @@ def test_game_process_detection(tmp_path, env, args, expected):
     assert DETECTOR(APP, proc) is expected
 
 
-def test_game_process_detection_fails_closed_on_unreadable_snapshot(tmp_path, monkeypatch):
+def test_art_steamos_39_capsule_and_header_names(game_paths):
+    # SteamOS 3.9 clients store library_capsule.jpg and library_header.jpg (Deck, 2026-11-01).
+    cache = game_paths.steam / "appcache/librarycache" / APP
+    capsule = cache / ("c" * 40) / "library_capsule.jpg"
+    header = cache / ("d" * 40) / "library_header.jpg"
+    for file in (capsule, header):
+        atomic(file, b"image")
+    art = cli.game(game_paths, APP)["art"]
+    assert art["portrait"] == str(capsule.resolve()) and art["header"] == str(header.resolve())
+
+
+def test_game_running_skips_processes_hiding_their_environment(tmp_path, monkeypatch):
     proc = tmp_path / "proc"
-    atomic(proc / "123/environ", b"")
-    atomic(proc / "123/cmdline", b"wine\0")
-    original = Path.read_bytes
-    def unreadable(path):
-        if path.name == "environ":
-            raise PermissionError("denied")
-        return original(path)
-    monkeypatch.setattr(Path, "read_bytes", unreadable)
-    assert DETECTOR is not None, "Unknown process state must protect game files"
-    with pytest.raises(Error, match="safely"):
-        DETECTOR(APP, proc)
+    hidden, game = proc / "100", proc / "200"
+    for process in (hidden, game):
+        (process).mkdir(parents=True)
+        (process / "cmdline").write_bytes(b"x\0")
+    (hidden / "environ").write_bytes(b"")
+    (game / "environ").write_bytes(f"SteamAppId={APP}\0".encode())
+    real = Path.read_bytes
+    def read_bytes(self):
+        if self == hidden / "environ":
+            raise PermissionError("undumpable")
+        return real(self)
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    assert DETECTOR(APP, proc) is True
+    assert DETECTOR("999", proc) is False

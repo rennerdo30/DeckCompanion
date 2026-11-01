@@ -69,6 +69,10 @@ def game_running(ident, proc_root=Path("/proc")):
                             return True
             except (FileNotFoundError, ProcessLookupError):
                 continue  # Process exited during the snapshot.
+            except PermissionError:
+                # Same-user but undumpable processes (gamescope, sandbox helpers) hide their
+                # environment; games launched by Steam stay readable (hardware check 2026-11-01).
+                continue
     except OSError as exc:
         raise Error("game_state_unknown", "Cannot check all game processes safely") from exc
     return False
@@ -89,12 +93,15 @@ def artwork(paths, ident):
     except Error:
         grid = None
     result = {}
-    for name, filename, suffix in (("portrait", "library_600x900", "p"),
-                                   ("hero", "library_hero", "_hero"),
-                                   ("header", "header", ""), ("logo", "logo", "_logo")):
-        options = [p for ext in ("jpg", "png") for p in sorted((cache / ident).glob(f"*/{filename}.{ext}"))]
-        options += [cache / ident / f"{filename}.{ext}" for ext in ("jpg", "png")]
-        options += [cache / f"{ident}_{filename}.{ext}" for ext in ("jpg", "png")]
+    # SteamOS 3.9 clients name the portrait "library_capsule" and the header "library_header".
+    for name, filenames, suffix in (("portrait", ("library_600x900", "library_capsule"), "p"),
+                                    ("hero", ("library_hero",), "_hero"),
+                                    ("header", ("header", "library_header"), ""), ("logo", ("logo",), "_logo")):
+        options = []
+        for filename in filenames:
+            options += [p for ext in ("jpg", "png") for p in sorted((cache / ident).glob(f"*/{filename}.{ext}"))]
+            options += [cache / ident / f"{filename}.{ext}" for ext in ("jpg", "png")]
+            options += [cache / f"{ident}_{filename}.{ext}" for ext in ("jpg", "png")]
         if grid:
             options.append(grid / f"{ident}{suffix}.png")
         result[name] = next((str(p.resolve()) for p in options if p.is_file()), None)

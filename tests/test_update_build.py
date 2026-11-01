@@ -165,4 +165,7 @@ def test_release_build_resolves_latest_with_mock_api(tmp_path, monkeypatch):
         assert "src/deckcompanion/__main__.py" in names and "vdf/LICENSE" in names
         assert tar.getmember("compat/DeckCompanion").mode & 0o111
         assert not any("__pycache__" in n or n.startswith("ui/") for n in names)
+        # The bundled FS25 recipe is the resolved one, so it stays installable without the cache.
+        bundled = __import__("tomllib").loads(tar.extractfile("recipes/2300320.toml").read().decode())
+        assert bundled["mods"][0]["sha256"] == "a"*64 and bundled["runtime"]["sha256"] == "b"*64
     assert (tmp_path / "release/checksums.sha256").read_text().startswith(result["sha256"])
