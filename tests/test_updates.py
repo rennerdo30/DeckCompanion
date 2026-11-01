@@ -35,7 +35,8 @@ def test_updates_available_reads_cached_data_only(paths, monkeypatch):
     write_json(root / "plugin.json", {"name": "ProtonDB Badges"})
     write_json(root / "package.json", {"version": "1.2.0"})
     write_json(paths.cache / "decky-release.json", {"version": "v3.3.1"})
-    write_json(paths.cache / "decky-plugin-release.json", {"version": "0.2.0"})
+    write_json(paths.cache / "decky-plugin-release.json", {"version": "0.2.0", "sha256": "b" * 64,
+               "url": "https://github.com/rennerdo30/DeckCompanion/releases/download/decky-v0.2.0/deckcompanion-decky-0.2.0.zip"})
     write_json(paths.cache / "decky-store.json", {"plugins": {"ProtonDB Badges": {
         "version": "1.3.4", "sha256": "a" * 64, "url": decky.STORE_CDN + "a" * 64 + ".zip"}}})
     # autouse network guard stays active; service queries are forbidden too.

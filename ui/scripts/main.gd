@@ -32,7 +32,7 @@ var decky_pending_repeat := ""
 var launcher_backend: Node
 var launchers_data: Array = []
 var launcher_poll := 0.0
-const UI_VERSION := "0.4.11"
+const UI_VERSION := "0.4.12"
 # Design tokens (shared with the logo and Steam artwork palette).
 var INK: Color = Color("e7f1f4")
 var MUTED: Color = Color("8fa6b2")
