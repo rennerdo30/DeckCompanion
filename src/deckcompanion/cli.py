@@ -79,6 +79,7 @@ def parser():
     runtime = commands.add_parser("umu")
     runtime.add_argument("action", choices=("install",))
     runtime.add_argument("--json", action="store_true")
+    runtime.add_argument("--pin", help="Track this umu release tag, or latest to clear a pin")
     for name in ("games", "game", "game-option", "enable", "disable", "mod", "default", "restore-all", "apply", "status", "update", "rollback", "settings"):
         sub = commands.add_parser(name)
         sub.add_argument("--json", action="store_true")
@@ -184,6 +185,8 @@ def execute(args, paths):
     if name in ("add-game", "remove-game", "umu"):
         from . import nonsteam, umu
         if name == "umu":
+            if args.pin is not None:
+                umu.pin(paths, args.pin)
             return umu.install(paths)
         if name == "remove-game":
             return nonsteam.remove(paths, args.slug)
@@ -307,6 +310,7 @@ def execute(args, paths):
         save_state(paths, data)
     if name in ("status", "default"):
         from .decky import shortcut
+        from . import channels
         _, eligible = takeover.discover(paths)
         pending = [{"appid": ident, "action": item["pending"]} for ident, item in data["games"].items() if item.get("pending")]
         pending += [{"slug": g["slug"], "action": g["pending"]} for g in data.get("non_steam", {}).values() if g.get("pending")]
@@ -315,6 +319,7 @@ def execute(args, paths):
         pending += takeover.restore_pending(data)
         return {"version": __version__, "install_path": str(paths.data), "steam_running": steam.running(),
                 "shortcut_appid": shortcut(paths),
+                "channels": channels.snapshot(paths),
                 "default_tool": steam.mappings(steam.read_vdf(steam.mapping_path(paths))).get("0", {}).get("name") == "DeckCompanion",
                 "pending": pending,
                 "takeover_all": data.get("settings", {}).get("takeover_all", True),

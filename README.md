@@ -14,7 +14,7 @@ original game files and save prefix. Store selection supplies compatibility fixe
 not store login, DRM bypass or a game downloader.
 
 The shortcut runs the official umu-launcher zipapp as a separate process with the
-best installed Proton (GE preferred). `update` installs the pinned runtime, or run
+best installed Proton (GE preferred). `update` tracks the newest upstream runtime (with an optional safety pin), or run
 `deckcompanion umu install --json`. First launch may download umu's Steam runtime.
 The GPL-3.0 runtime and its LICENSE are downloaded into the user's data directory;
 no umu code is included in DeckCompanion's MIT source or release tarball.
@@ -46,15 +46,19 @@ See [CLI details](docs/cli.md#decky-loader-and-independent-plugin).
 Open Konsole on your Steam Deck and paste this one line:
 
 ```sh
-curl -fsSL https://github.com/rennerdo30/DeckCompanion/releases/latest/download/install.sh | sh
+curl -fsSL --proto =https --proto-redir =https --connect-timeout 10 --max-time 30 "$(timeout 60s python3 -c 'import json,re,urllib.request; releases=[]; exec("for page in range(1,11):\n with urllib.request.urlopen(\"https://api.github.com/repos/rennerdo30/DeckCompanion/releases?per_page=100&page=\"+str(page),timeout=5) as response: batch=json.loads(response.read(8388609))\n releases.extend(batch)\n if len(batch)<100: break\nelse: raise ValueError(\"Release listing exceeds bounded pagination\")"); r=max((r for r in releases if not r.get("draft") and not r.get("prerelease") and re.fullmatch(r"v[0-9]+[.][0-9]+[.][0-9]+",r.get("tag_name",""))),key=lambda r:r.get("published_at","")); print(next(a["browser_download_url"] for a in r["assets"] if a["name"]=="install.sh"))')" | timeout 300s sh
 ```
 
 Or download **DeckCompanion-Installer.desktop** from the
-[latest release](https://github.com/rennerdo30/DeckCompanion/releases/latest),
+[newest engine `v*` release](https://github.com/rennerdo30/DeckCompanion/releases),
 mark it executable if prompted, and double-click it. It opens Konsole and runs
 the same installer, with download and execution timeouts.
 
-Steam can stay running. The installer downloads the latest release index and
+The command, desktop launcher and standalone bootstrap use bounded, paginated
+release discovery and select only stable `v<semver>` engine tags. Content and
+Decky releases cannot redirect installation.
+
+Steam can stay running. The installer downloads the newest engine release index and
 engine, verifies SHA256, installs under `~/.local/share/deckcompanion/`, and
 queues DeckCompanion as **Steam's default compatibility tool**. It then applies
 the changes automatically, including from a pipe without a terminal prompt.

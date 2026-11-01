@@ -83,7 +83,7 @@ def test_uninstall_removes_owned_shortcuts_and_keeps_saves(paths, ns, tmp_path, 
 
 
 def test_umu_cli_install_command(paths, runtime, monkeypatch, capsys):
-    monkeypatch.setattr(runtime, "install", lambda p: {"installed": True, "version": runtime.VERSION})
+    monkeypatch.setattr(runtime, "install", lambda p: {"installed": True, "version": "9.1"})
     assert cli.main(["umu", "install", "--json"]) == 0
     assert '"installed": true' in capsys.readouterr().out
 
@@ -214,23 +214,11 @@ def test_run_umu_recipe_content_and_protected_environment(paths, ns, runtime, tm
 
 
 def test_install_verifies_archive_and_license_atomically(paths, runtime, tmp_path, monkeypatch):
-    blob = io.BytesIO()
-    with tarfile.open(fileobj=blob, mode="w") as tar:
-        info = tarfile.TarInfo("umu/umu-run")
-        info.size = 8
-        tar.addfile(info, io.BytesIO(b"#!zipapp"))
-    archive = tmp_path / "release.tar"
-    archive.write_bytes(blob.getvalue())
-    license_file = tmp_path / "LICENSE"
-    license_file.write_bytes(b"license fixture")
-    monkeypatch.setattr(runtime, "SHA256", net.digest(archive))
-    monkeypatch.setattr(runtime, "LICENSE_SHA256", net.digest(license_file))
-    def download(url, target, budget):
-        atomic(target, (archive if url == runtime.URL else license_file).read_bytes())
-    monkeypatch.setattr(net, "fetch", download)
+    from test_channels import umu_network
+    umu_network(monkeypatch)
     result = runtime.install(paths)
     target = Path(result["path"])
-    assert target.read_bytes() == b"#!zipapp" and (target.parent / "LICENSE").read_bytes() == b"license fixture"
+    assert target.read_bytes() == b"#!zipapp 9.1" and (target.parent / "LICENSE").read_bytes() == b"license fixture"
     assert runtime.install(paths) == result
     target.write_bytes(b"changed")
     with pytest.raises(Error, match="Preserving changed"):
@@ -239,10 +227,11 @@ def test_install_verifies_archive_and_license_atomically(paths, runtime, tmp_pat
 
 
 def test_bad_umu_checksum_never_activates(paths, runtime, monkeypatch):
-    monkeypatch.setattr(net, "fetch", lambda url, target, budget: atomic(target, b"corrupt"))
+    from test_channels import umu_network
+    umu_network(monkeypatch, corrupt=True)
     with pytest.raises(Error, match="checksum"):
         runtime.install(paths)
-    assert not (paths.data / "umu" / runtime.VERSION).exists()
+    assert not (paths.data / "umu/9.1").exists()
 
 
 def test_run_umu_real_recipe_mods_settings_and_preferences(paths, ns, runtime, tmp_path, monkeypatch):
