@@ -90,8 +90,10 @@
       },
       "proton": {
         "name": "GE-Proton11-7-x86_64",
-        "reason": "newest"
-      }
+        "reason": "community_fix"
+      },
+      "community_fix": "applied",
+      "community_fix_source": "GE-Proton11-7-x86_64"
     },
     {
       "appid": "1817190",

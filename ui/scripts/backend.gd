@@ -20,7 +20,7 @@ var default_pending = null
 var removed_pending: Array = []
 var worker: Thread
 var active := ""
-var settings := {"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true,"auto_install_ge":true,"cleanup_old_ge":true,"splash_parallel":false,"takeover_all":true}
+var settings := {"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true,"auto_install_ge":true,"cleanup_old_ge":true,"splash_parallel":false,"takeover_all":true,"prefer_community_fixes":true}
 var proton_builds: Array = [{"name":"GE-Proton11-11","state":"wanted","installed":false,"wanted_by":["Farming Simulator 25"],"latest":true},{"name":"GE-Proton11-7","state":"installed","installed":true,"installed_bytes":1717986918,"removable":true}]
 var proton_ticks := 0
 

@@ -1089,7 +1089,9 @@ func _proton_picker(parent: Node) -> void:
 	var build: Variant = selected.get("proton")
 	var reason: String = str(build.get("reason","")) if build is Dictionary else ""
 	var valve: Variant = selected.get("valve_recommendation")
-	var hint := Text.proton(selected) + ("  ·  Valve suggests " + str(valve) if valve != null and reason != "valve_recommended" else "")
+	var hint := Text.proton(selected) + ("  ·  Valve suggests " + str(valve) if valve != null and reason not in ["valve_recommended","community_fix"] else "")
+	if Text.community(selected) != "" and reason != "community_fix": hint += "
+" + Text.community(selected)
 	var row := _setting_row(parent,"Proton",hint)
 	var picker := OptionButton.new()
 	picker.custom_minimum_size = Vector2(250,42)
@@ -1163,6 +1165,7 @@ func _settings_screen() -> void:
 	_setting_toggle(updates,"check_updates_on_start","Check when DeckCompanion opens","Looks for a newer engine and recipes in the background.")
 	_setting_toggle(updates,"auto_install_ge","Install newest GE-Proton","Recipe pins are always installed; this also keeps the newest GE.")
 	_setting_toggle(updates,"cleanup_old_ge","Clean up old GE-Proton","Removes only builds DeckCompanion installed and no longer needs.")
+	_setting_toggle(updates,"prefer_community_fixes","Prefer community fixes","Games with an umu-protonfixes fix use GE-Proton unless a recipe or you chose otherwise.")
 	var check_row := _setting_row(updates,"Check for updates","Engine, recipes and Proton builds.")
 	_chip("Checking…" if update_backend.busy else "Check now",_check_updates,check_row,"check").size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_decky_card(columns[1])

@@ -722,6 +722,9 @@ func ui_032(ui: Node) -> void:
 func ge_checks(ui: Node) -> void:
 	ui._switch_tab(2)
 	check(control(ui,"auto_install_ge") != null and control(ui,"cleanup_old_ge") != null,"GE settings toggles exist")
+	check(control(ui,"prefer_community_fixes") != null,"community-fix preference toggle exists (DC-39)")
+	check(ui.Text.proton({"proton":{"name":"GE-Proton10-9","reason":"community_fix"}}) == "GE-Proton10-9 · has a community fix","community-fix reason reads as plain words")
+	check(ui.Text.community({"community_fix":"available_not_installed"}).contains("not installed") and ui.Text.community({}) == "","community-fix line only when the engine reports one")
 	if control(ui,"auto_install_ge") == null: return
 	control(ui,"auto_install_ge").pressed.emit()
 	await create_timer(0.25).timeout

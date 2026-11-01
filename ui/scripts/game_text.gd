@@ -9,8 +9,15 @@ static func fix(game: Dictionary) -> String:
 static func proton(game: Dictionary) -> String:
 	var build: Variant = game.get("proton")
 	if not build is Dictionary: return "Proton · Not reported by engine"
-	var reasons := {"pinned": "recipe pin", "recipe_fallback": "recipe fallback", "newest": "newest installed", "valve_recommended": "Valve recommendation", "user_override": "your choice"}
+	var reasons := {"pinned": "recipe pin", "recipe_fallback": "recipe fallback", "newest": "newest installed", "valve_recommended": "Valve recommendation", "user_override": "your choice", "community_fix": "has a community fix"}
 	return str(build.get("name", "Unknown Proton")) + " · " + str(reasons.get(build.get("reason"), "not reported"))
+
+## One short line about umu-protonfixes for this game, or "" when there is none.
+static func community(game: Dictionary) -> String:
+	match game.get("community_fix"):
+		"applied": return "Community fix runs with " + str(game.get("community_fix_source", "GE-Proton"))
+		"available_not_installed": return "Community fix available with GE-Proton (not installed)"
+	return ""
 
 static func version(value: Variant) -> String:
 	if value == null or str(value).is_empty() or value == "unresolved": return "latest"
