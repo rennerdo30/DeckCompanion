@@ -19,7 +19,7 @@ def test_four_second_default_and_ten_second_clamp(paths):
 
 @pytest.mark.parametrize('seconds,expected', [(1, 123), (4, 126), (10, 130)])
 def test_engine_wait_covers_hold_cap_and_kills_only_owned_pid(paths, monkeypatch, seconds, expected):
-    save_state(paths, {'games': {}, 'settings': {'splash_seconds': seconds}})
+    save_state(paths, {'games': {}, 'settings': {'splash_seconds': seconds, 'splash_parallel': False}})
     events = []
     class Process:
         pid = 9321

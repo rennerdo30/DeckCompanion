@@ -12,7 +12,9 @@ STARTED_PIDS = []
 MAX_SECONDS = 10.0
 HOLD_SECONDS = 120
 HARD_TIMEOUT = 130
-DEFAULTS = {"splash": True, "splash_seconds": 4.0,
+# splash_parallel: the game starts right away and the splash runs beside it (owner,
+# 2026-11-01). Off = the old behaviour: show the splash first, then start the game.
+DEFAULTS = {"splash": True, "splash_seconds": 4.0, "splash_parallel": True,
             "show_games_without_recipe": True, "check_updates_on_start": True,
             "auto_install_ge": True, "cleanup_old_ge": True}
 
@@ -50,6 +52,19 @@ def show(paths, payload, env):
         configured = env.get("DECKCOMPANION_UI", str(paths.data / "bin/deckcompanion-ui"))
         binary = shutil.which(configured) or str(Path(configured).expanduser())
         payload = dict(payload, duration_seconds=options["splash_seconds"])
+        if options.get("splash_parallel", True):
+            # Detached: own session, never waited for, so Proton starts immediately and the
+            # splash closes on its own timer (its hold mode has a 120 s safety cap).
+            run = paths.data / "run"
+            run.mkdir(parents=True, exist_ok=True)
+            file = run / f"splash-{ident if str(ident).isdigit() else 'unknown'}.json"
+            file.write_text(json.dumps(dict(payload, parallel=True), ensure_ascii=False), encoding="utf-8")
+            with (paths.data / "logs" / "splash-ui.log").open("wb") as output:
+                proc = subprocess.Popen([binary, "--splash", str(file)], env=env, stdout=output,
+                                        stderr=output, stdin=subprocess.DEVNULL, start_new_session=True)
+            STARTED_PIDS.append(proc.pid)
+            log(paths, ident, f"started PID {proc.pid} in parallel with the game")
+            return
         # Close before spawning: Godot must be able to read it on Windows too.
         with tempfile.TemporaryDirectory(prefix="deckcompanion-splash-") as directory:
             file = Path(directory) / "splash.json"

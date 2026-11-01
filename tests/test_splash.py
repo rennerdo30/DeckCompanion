@@ -35,7 +35,7 @@ def test_settings_defaults_clamp_persist_and_preserve(paths):
     save_state(paths, {"games": {"42": {"mods": {"keep": False}}}, "settings": {"future": 9}})
     assert cli.execute(command(), paths) == {"splash": True, "splash_seconds": 4,
         "show_games_without_recipe": True, "check_updates_on_start": True, "future": 9,
-        "auto_install_ge": True, "cleanup_old_ge": True}
+        "auto_install_ge": True, "cleanup_old_ge": True, "splash_parallel": True}
     result = cli.execute(command("--splash", "off", "--splash-seconds", "99"), paths)
     assert result["splash"] is False and result["splash_seconds"] == 10
     assert cli.execute(command(), paths)["splash"] is False
@@ -52,7 +52,9 @@ def test_settings_reject_nonfinite(paths, number):
     assert cli.execute(command(), paths)["splash_seconds"] == 3
 
 
-def supervise(monkeypatch, paths, mode="ok"):
+def supervise(monkeypatch, paths, mode="ok", parallel=False):
+    # Most tests cover the wait-first mode; parallel mode has its own test below.
+    cli.execute(command("--set", "splash_parallel=" + ("on" if parallel else "off")), paths)
     events, payloads, files = [], [], []
     class Process:
         pid = 45123
@@ -172,3 +174,18 @@ def test_custom_duration_default_binary_and_summary_error_fail_open(paths, runti
     launch.launch(paths, "run", ["game.exe"])
     assert events[-1][0] == "exec"
     assert "summary unavailable" in (paths.data / "logs/42-last.log").read_text()
+
+
+def test_parallel_splash_starts_game_immediately(paths, runtime, monkeypatch):
+    # Owner 2026-11-01: the game loads in the background while the splash shows.
+    events, payloads, files = supervise(monkeypatch, paths, parallel=True)
+    seen = {}
+    real = subprocess.Popen
+    launch.launch(paths, "run", ["game.exe"])
+    assert [e[0] for e in events] == ["splash", "exec"]  # never waits for the splash
+    assert payloads[0]["parallel"] is True and payloads[0]["name"] == "Fixture Game"
+    assert files[0].exists() and files[0].parent.name == "run"  # survives the exec into Proton
+
+
+def test_parallel_splash_is_the_default(paths):
+    assert cli.execute(command(), paths)["splash_parallel"] is True

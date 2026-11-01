@@ -61,8 +61,9 @@ func run(test: SceneTree, ui: Node) -> void:
 		splash.set_payload(payload)
 		await test.create_timer(0.25).timeout
 		var art_rect: Rect2 = splash.art.get_global_rect()
-		test.check(art_rect.size.y >= viewport.y * 0.28 and art_rect.size.y <= viewport.y * 0.6,
-			"splash artwork has a dedicated hero band " + str(viewport))
+		var visible_size: Vector2 = splash.get_viewport_rect().size  # canvas_items stretch keeps a 1280x800 logical canvas
+		test.check(art_rect.size.x >= visible_size.x - 1 and art_rect.size.y >= visible_size.y - 1,
+			"splash artwork is a full-bleed key visual " + str(viewport))
 		test.check(splash.content.get_global_rect().end.y <= viewport.y,
 			"long title and many mods keep footer inside splash " + str(viewport))
 		var containers := scrolls(splash)

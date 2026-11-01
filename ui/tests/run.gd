@@ -268,7 +268,7 @@ func ui_034(ui: Node) -> void:
 		await process_frame
 		check(splash.loaded and splash.title.text == "Farming Simulator 25","splash renders fixture JSON")
 		check(not has_backend(splash),"splash contains no engine backend")
-		check(splash.proton_line.text.contains("GE-Proton11-11") and splash.fixes_line.text.contains("Upstream chaining: yes"),"splash shows Proton and configured fixes")
+		check(splash.proton_line.text.contains("GE-Proton11-11") and splash.fixes_line.text.contains("Community fixes (umu-protonfixes): on"),"splash shows Proton and configured fixes")
 		check(splash.mod_rows.get_child_count() == 3 and splash.mod_rows.get_child(1).text.contains("Installed"),"splash shows installed mod state")
 		for i in 100:
 			await process_frame
