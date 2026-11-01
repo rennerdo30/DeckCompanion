@@ -92,10 +92,13 @@ def parser():
     helper.add_argument("--game-mode", action="store_true")
     commands.choices["update"].add_argument("--detach", action="store_true")
     proton = commands.add_parser("proton")
-    proton.add_argument("action", nargs="?", choices=("install",))
+    proton.add_argument("action", nargs="?", choices=("install", "available", "remove"))
     proton.add_argument("name", nargs="?")
     proton.add_argument("--json", action="store_true")
     proton.add_argument("--detach", action="store_true")
+    proton.add_argument("--force", action="store_true")
+    proton.add_argument("--page", type=int, default=1)
+    proton.add_argument("--per-page", type=int, default=30)
     worker = commands.add_parser("proton-helper", help=argparse.SUPPRESS)
     worker.add_argument("task", choices=("install", "update"))
     worker.add_argument("name", nargs="?")
@@ -115,12 +118,24 @@ def execute(args, paths):
         from . import proton
         if name == "proton-helper":
             return proton.run(paths, args.task, args.name)
+        if args.force and args.action != "remove":
+            raise Error("invalid_arguments", "--force is only supported by proton remove")
+        if args.action != "available" and (args.page != 1 or args.per_page != 30):
+            raise Error("invalid_arguments", "Pagination is only supported by proton available")
+        if args.action == "available":
+            if args.name or args.detach:
+                raise Error("invalid_arguments", "Use proton available --page N --per-page N --json")
+            return proton.available(paths, args.page, args.per_page)
         if not args.action:
             if args.name or args.detach:
                 raise Error("invalid_arguments", "Use proton install <name> --detach")
             return proton.listing(paths)
         if not args.name:
-            raise Error("invalid_arguments", "proton install requires a build name")
+            raise Error("invalid_arguments", f"proton {args.action} requires a build name")
+        if args.action == "remove":
+            if args.detach:
+                raise Error("invalid_arguments", "Removal does not support --detach")
+            return proton.remove(paths, args.name, args.force)
         return (proton.schedule if args.detach else proton.run)(paths, "install", args.name)
     if name == "update":
         from . import proton

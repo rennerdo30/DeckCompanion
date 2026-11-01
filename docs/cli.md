@@ -418,17 +418,98 @@ Not verified on hardware: Game Mode focus, gamescope window stacking and timing.
 
 `proton --json` is a local-only read returning `{builds:[...],active,job,status_file}`.
 Each row has `name`, `state`, `installed`, optional `path`, `wanted_by` (recipe names),
-`latest`, `installed_bytes`, and progress fields `percent`, `downloaded_bytes`,
+`latest`, and progress fields `percent`, `downloaded_bytes`,
 `total_bytes` or `error`. States: wanted, scheduled, downloading, verifying,
 unpacking, installed, failed. Latest is unknown until metadata has been fetched.
+Every installed build (including external GE, UMU and Valve builds) has
+`installed_bytes` (logical file bytes, excluding links; null if unreadable) and
+`removable` (a direct build under the configured compatibility-tools root, outside
+Steam-managed depots). Sizes reflect current files, rather than old install receipts.
+`removable` describes location eligibility; running-process/reference checks happen
+when removing. Example idle response, with all top-level fields:
 
-`proton install NAME --json` downloads, verifies and installs a versioned GE build.
+```json
+{"builds":[{"name":"GE-Proton11-10","path":"/home/deck/.local/share/Steam/compatibilitytools.d/GE-Proton11-10","state":"installed","installed":true,"installed_bytes":4096,"removable":true}],"active":false,"job":{},"status_file":"/home/deck/.local/share/deckcompanion/proton-job.json"}
+```
+
+`proton available --page 1 --per-page 30 --json` lists one page from
+`GloriousEggroll/proton-ge-custom`'s GitHub releases API. Page defaults to 1;
+per-page defaults to 30 (1–100). Follow `next_page` until null; an empty page can
+still have a next page because unsupported releases are filtered. Rows are newest
+first by publication date within GitHub's page order. Only stable x86_64 GE archives
+up to 2 GiB with an API SHA256 or a SHA512 checksum asset are listed, including
+older `Proton-6.21-GE-2` style names. UMU release discovery is not included.
+Each page/size pair is cached for six hours. Expiry refresh uses the existing owned
+network worker with a total two-second network budget (including DNS and reads).
+On failure the same cached page is returned with `stale:true` and a `warning`;
+without a cached page the normal error envelope uses `ge_available_failed`.
+Installed flags are recomputed locally even for cached pages.
+Exact example response, with every field:
+
+```json
+{"builds":[{"name":"GE-Proton11-11","published_at":"2026-11-01T10:00:00Z","size":500000000,"digest_available":true,"checksum_algorithm":"sha256","installed":false}],"source":"GloriousEggroll/proton-ge-custom","page":1,"per_page":30,"has_more":true,"next_page":2,"fetched_at":"2026-11-01T13:00:00+00:00","cached":false,"stale":false,"warning":null}
+```
+
+`published_at` is the upstream ISO8601 publication date (or null if absent).
+`size` is compressed archive bytes. `digest_available` means a usable SHA256
+digest on the archive's API asset, not the checksum file's own digest.
+When false, `checksum_algorithm` is `sha512` and installation verifies the named
+archive against its checksum asset. Fresh cache hits use `cached:true,stale:false`;
+stale fallback retains `fetched_at`. Example fallback suffix:
+`"cached":true,"stale":true,"warning":"Download timed out; keeping cached content"`.
+
+`proton install NAME --json` downloads, verifies and installs any listed GE build.
+This reuses the existing verified/resumable installer, including recipe SHA256
+checks and atomic staging; it does not copy or import umu-launcher code.
+Exact response after a new successful foreground install:
+
+```json
+{"name":"GE-Proton11-10","state":"installed","path":"/home/deck/.local/share/Steam/compatibilitytools.d/GE-Proton11-10","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+```
+
+The digest above is illustrative. Reinstalling an already installed build returns
+its current installed `builds` row instead (same fields as the local listing,
+including `installed:true`, `installed_bytes` and `removable`, plus any pin/latest
+fields). The command preserves existing foreign directories.
 `--detach` submits a bounded Linux user service and returns
 `{scheduled:true,active:true,status_file:".../proton-job.json"}` immediately.
 Poll `proton --json`; atomic per-build receipts are in `proton-status/NAME.json`.
 The job file holds active state, PID once started, completion result or failure.
 Scheduling does not confirm installation. Retry resumes interrupted partial files.
 Only one install/update worker runs; polling and settings remain available.
+
+`proton remove NAME --json` explicitly removes a user- or DeckCompanion-installed
+build under the configured `compatibilitytools.d` root. It never removes Valve
+depots under any library's `steamapps/common`, even if that path is configured as
+the tools root. Linked root aliases are refused; nested links are unlinked without
+deleting their targets. Running runtime processes (including unknown games/umu),
+games detected by the existing Steam process check and unresolved process state
+block removal. `--force` does not bypass process, path or busy-worker checks.
+Recipe pins (including disabled games) and saved `game-option --proton` overrides
+block removal with `proton_in_use` unless `--force` is given. Saved pins/overrides
+are preserved; a later update may reinstall an enabled recipe pin.
+On success the response is the updated local listing plus `removed` (name array)
+and `warnings` (reference object array). Exact empty-list example:
+
+```json
+{"builds":[],"active":false,"job":{},"status_file":"/home/deck/.local/share/deckcompanion/proton-job.json","removed":["GE-Proton11-10"],"warnings":[]}
+```
+
+With `--force`, each bypassed reference is reported, for example:
+`"warnings":[{"kind":"recipe_pin","appid":"2300320","name":"Farming Simulator 25"},{"kind":"game_override","appid":"42","name":"42"}]`.
+`kind` is `recipe_pin` or `game_override`; override names currently use the appid.
+Remaining wanted/latest rows can still appear with `installed:false`.
+The ownership registry and progress receipt are cleared for the removed build.
+`state.json` preserves a journal entry at `proton_removals.NAME` with exactly
+`{path,removed_at,state,forced,references}`; `state` is `removing` before deletion
+and `removed` on success. `references` has the same shape as `warnings`.
+Errors use the standard `{error:{code,message}}` envelope and nonzero exit status:
+`proton_not_removable`, `proton_in_use`, `proton_running`, `game_state_unknown`,
+or `busy`. Removal is synchronous and does not accept `--detach`.
+Process inspection is a snapshot, not a lock against a later external Steam launch.
+Automatic owned-build cleanup also preserves explicit per-game Proton overrides.
+**Not verified on hardware:** real SteamOS process inspection, deletion/size cost,
+Steam's compatibility-tool rediscovery, or running/pinned-game UI confirmation.
 
 `update --detach --json` schedules engine/index and GE updates through the same
 worker. Its final result is in `job.result`, including `engine`, `index` and `proton`.
