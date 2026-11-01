@@ -205,7 +205,7 @@ def test_plugin_install_independent_preserves_existing_and_requires_writable(pat
     directory = decky.homebrew() / "plugins"
     directory.mkdir()
     monkeypatch.setattr(decky.os, "access", lambda *a: False)
-    assert decky.plugin_install(paths)["reason"] == "plugins_not_writable"
+    assert decky.plugin_install(paths)["reason"] == "decky_api_unavailable"
     monkeypatch.setattr(decky.os, "access", lambda *a: True)
     assert call(paths, "decky", "plugin-status")["can_install"]
     assert not (directory / "DeckCompanion").exists()
@@ -213,7 +213,7 @@ def test_plugin_install_independent_preserves_existing_and_requires_writable(pat
     assert (directory / "DeckCompanion/main.py").read_text() == "payload"
     assert decky.plugin_install(paths)["changed"] is False
     atomic(directory / "DeckCompanion/main.py", "user edited")
-    assert decky.plugin_install(paths)["reason"] == "existing_plugin_preserved"
+    assert decky._plugin_install_writable(paths)["reason"] == "existing_plugin_preserved"
     assert (directory / "DeckCompanion/main.py").read_text() == "user edited"
 
 
@@ -225,7 +225,7 @@ def test_plugin_archive_rejects_traversal_before_writes(paths, decky, tmp_path, 
         bundle.writestr("DeckCompanion/../outside", "bad")
     release["sha256"] = net.digest(archive)
     with pytest.raises(Error, match="Unexpected plugin"):
-        decky.plugin_install(paths)
+        decky._plugin_install_writable(paths)
     assert not (decky.homebrew() / "plugins/DeckCompanion").exists()
     assert not (decky.homebrew() / "outside").exists()
 
@@ -263,7 +263,7 @@ def test_plugin_update_retains_backup_and_rejects_bad_sha(paths, decky, tmp_path
     archive, release = plugin_release_fixture(paths, decky, tmp_path, monkeypatch)
     atomic(decky.homebrew() / "services/PluginLoader", "binary")
     (decky.homebrew() / "plugins").mkdir()
-    assert decky.plugin_install(paths)["changed"]
+    assert decky._plugin_install_writable(paths)["changed"]
     # Different bytes under a later release, without touching engine/current.
     with zipfile.ZipFile(archive, "w") as bundle:
         for name in decky.PLUGIN_FILES:
@@ -271,10 +271,10 @@ def test_plugin_update_retains_backup_and_rejects_bad_sha(paths, decky, tmp_path
             bundle.writestr("DeckCompanion/" + name, text)
     release.update(version="0.2.0", sha256="0" * 64)
     with pytest.raises(Error, match="SHA256"):
-        decky.plugin_install(paths)
+        decky._plugin_install_writable(paths)
     assert (decky.homebrew() / "plugins/DeckCompanion/main.py").read_text() == "payload"
     release["sha256"] = net.digest(archive)
-    result = decky.plugin_install(paths)
+    result = decky._plugin_install_writable(paths)
     assert result["version"] == "0.2.0" and result["changed"]
     assert (Path(result["backup"]) / "main.py").read_text() == "payload"
     assert not (paths.data / "current").exists()
@@ -287,7 +287,7 @@ def test_plugin_activation_failure_restores_previous_install(paths, decky, tmp_p
     archive, release = plugin_release_fixture(paths, decky, tmp_path, monkeypatch)
     atomic(decky.homebrew() / "services/PluginLoader", "binary")
     (decky.homebrew() / "plugins").mkdir()
-    decky.plugin_install(paths)
+    decky._plugin_install_writable(paths)
     before = (paths.data / "decky-plugin-installed.json").read_bytes()
     # A repacked release with the same version is still a byte change and needs verification.
     release["sha256"] = "f" * 64
@@ -296,7 +296,7 @@ def test_plugin_activation_failure_restores_previous_install(paths, decky, tmp_p
     release["sha256"] = net.digest(archive)
     monkeypatch.setattr(decky, "write_json", lambda *a: (_ for _ in ()).throw(OSError("receipt denied")))
     with pytest.raises(OSError, match="receipt denied"):
-        decky.plugin_install(paths)
+        decky._plugin_install_writable(paths)
     assert (decky.homebrew() / "plugins/DeckCompanion/main.py").read_text() == "payload"
     assert (paths.data / "decky-plugin-installed.json").read_bytes() == before
 

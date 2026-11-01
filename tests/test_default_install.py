@@ -221,7 +221,7 @@ def test_shortcut_stable_icon_artwork_and_uninstall(paths, source, monkeypatch):
     assert not icon.exists()
 
 
-def test_release_includes_steam_art_and_standalone_assets(tmp_path, monkeypatch):
+def test_release_includes_steam_art_and_standalone_assets(tmp_path, monkeypatch, built_plugin):
     spec = importlib.util.spec_from_file_location("builder", ROOT / "scripts/build_release.py")
     builder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(builder)

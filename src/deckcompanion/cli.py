@@ -167,16 +167,16 @@ def execute(args, paths):
         return launchers.schedule(paths, args.id)
     if name == "decky":
         from . import decky
-        if args.password_file and (args.appid or args.action not in ("install", "set-password", "update-plugins")):
+        if args.password_file and (args.appid or args.action not in ("install", "set-password", "update-plugins", "plugin-install")):
             from pathlib import Path
             Path(args.password_file).unlink(missing_ok=True)
-            raise Error("invalid_arguments", "--password-file is only supported by install, set-password and update-plugins without --appid")
+            raise Error("invalid_arguments", "--password-file is only supported by install, set-password, update-plugins and plugin-install without --appid")
         if args.appid and args.action != "panel":
             raise Error("invalid_arguments", "--appid is only supported by decky panel")
         if args.action == "plugin-status":
             return decky.plugin_status(paths)
         if args.action == "plugin-install":
-            return decky.plugin_install(paths)
+            return decky.plugin_install_with_password(paths, args.password_file) if args.password_file else decky.plugin_install(paths)
         if args.action == "update-plugins":
             if not args.password_file:
                 raise Error("password_required", "--password-file is required")

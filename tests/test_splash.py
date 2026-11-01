@@ -36,7 +36,7 @@ def test_settings_defaults_clamp_persist_and_preserve(paths):
     assert cli.execute(command(), paths) == {"splash": True, "splash_seconds": 4,
         "show_games_without_recipe": True, "check_updates_on_start": True, "future": 9,
         "auto_install_ge": True, "cleanup_old_ge": True, "splash_parallel": False, "takeover_all": True,
-        "prefer_community_fixes": True}
+        "prefer_community_fixes": True, "decky_plugin_auto": True}
     result = cli.execute(command("--splash", "off", "--splash-seconds", "99"), paths)
     assert result["splash"] is False and result["splash_seconds"] == 10
     assert cli.execute(command(), paths)["splash"] is False

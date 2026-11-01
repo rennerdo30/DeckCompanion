@@ -60,9 +60,10 @@ def exchange(left, right):
 
 def replace(source, target, name, version, sha):
     source, target = Path(source), Path(target)
-    if (not target.is_absolute() or target.is_symlink() or not target.is_dir() or
+    if (not target.is_absolute() or target.is_symlink() or (target.exists() and not target.is_dir()) or
             target.parent.is_symlink() or target.parent.resolve() != target.parent):
-        raise ValueError("Plugin target must be an installed directory without symlink parents")
+        raise ValueError("Plugin target must be a directory without symlink parents")
+    target.parent.mkdir(parents=True, exist_ok=True)
     # Snapshot the unprivileged download into root's private staging directory,
     # then hash and extract that same descriptor; no download/extraction race.
     staging = Path(tempfile.mkdtemp(prefix=".dc-plugin-", dir=target.parent))
@@ -86,7 +87,11 @@ def replace(source, target, name, version, sha):
         if os.geteuid() == 0:
             for item in [root, *root.rglob("*")]:
                 os.chown(item, 0, 0)
-        exchange(root, target)
+        if target.exists():
+            exchange(root, target)
+        else:
+            # Same-filesystem rename publishes the complete new directory at once.
+            os.rename(root, target)
         activated = True
         # Old bytes remain recoverable in this private root-owned directory.
     finally:

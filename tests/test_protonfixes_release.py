@@ -3,7 +3,7 @@ from pathlib import Path
 import tarfile
 
 
-def test_release_excludes_upstream_and_nested_dependencies(tmp_path, monkeypatch):
+def test_release_excludes_upstream_and_nested_dependencies(tmp_path, monkeypatch, built_plugin):
     spec = importlib.util.spec_from_file_location(
         "dc_protonfixes_build", Path(__file__).resolve().parents[1] / "scripts/build_release.py")
     build = importlib.util.module_from_spec(spec)

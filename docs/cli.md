@@ -23,6 +23,7 @@ deckcompanion decky panel --json
 deckcompanion decky panel --appid 2300320 --json
 deckcompanion decky plugin-status --json
 deckcompanion decky plugin-install --json
+deckcompanion decky plugin-install --password-file F --json
 ```
 
 `decky status` returns `installed` (the `~/homebrew/services/PluginLoader` file),
@@ -57,7 +58,9 @@ SteamOS/Linux. The caller creates a private password file (prefer a mode-0700
 directory in `XDG_RUNTIME_DIR`). The engine reads it once and deletes it immediately,
 including rejected/unsupported attempts; it checks sudo using `sudo -S -k -p "" true`.
 The password is passed only on stdin, never argv, logs or durable state. After a
-successful Loader install it updates installed plugins **before** restarting Steam.
+successful Loader install it updates installed plugins and installs a missing
+DeckCompanion plugin **before** restarting Steam. The latter is controlled by
+`settings --set decky_plugin_auto=on|off` (default **on**).
 The existing result gains `plugins_updated` (successful plugin names) and
 `plugins_failed` (`name` and fixed error code), even when some plugins fail:
 
@@ -76,8 +79,9 @@ directory name, against the [Decky store](https://plugins.deckbrew.xyz/plugins):
 `update_available` is boolean. Unknown plugins stay listed with null latest and
 false availability. Store metadata has a separate six-hour cache and stale offline
 fallback; unavailable or malformed metadata never fails status. DeckCompanion's
-own plugin uses its independent `decky-v*` releases, including when installed in
-a differently named directory; it never updates from the store.
+own plugin selects the newer of its bundled first-install ZIP and independent
+`decky-v*` releases, including when installed in a differently named directory;
+it never updates from the store or downgrades to an older engine's bundle.
 
 Store ZIPs use `https://cdn.tzatzikiweeb.moe/file/steam-deck-homebrew/versions/<hash>.zip`.
 The store hash is the ZIP's SHA256 (verified against live ProtonDB Badges 1.3.4
@@ -90,12 +94,13 @@ previous directory remains under `plugins/.dc-plugin-*/unpack/` for recovery.
 Root replacement has its own 110-second timeout. A failed plugin leaves its old
 directory intact and does not fail a successful Loader install.
 
-`decky update-plugins --password-file F` applies only those plugin updates, with
-the same password handling. It does not install/update the Loader or install new
-plugins. Steam restarts only when at least one plugin changed. Its complete result:
+`decky update-plugins --password-file F` applies those plugin updates, with the
+same password handling. It also installs our missing panel when `decky_plugin_auto`
+is on. It does not install/update the Loader or add other new plugins. It restarts
+`plugin_loader` only when a plugin changed, without restarting Steam. Its result:
 
 ```json
-{"plugins_updated":["SteamGridDB"],"plugins_failed":[{"name":"ProtonDB Badges","error":"checksum_mismatch"}],"steam_restarting":true}
+{"plugins_updated":["SteamGridDB"],"plugins_failed":[{"name":"ProtonDB Badges","error":"checksum_mismatch"}],"steam_restarting":false,"loader_restarted":true}
 ```
 
 Per-plugin failures are reported in `plugins_failed`, including on exit 0; callers
@@ -120,30 +125,83 @@ up on timeout/unload. Registered `kind: non_steam` games expose mods and splash 
 disable routing and Proton choice by default. Future GAME `options.takeover` and
 `options.proton` booleans override that default as engine support becomes available.
 
-`decky plugin-status` returns the installed plugin version, `decky_installed`,
-`plugins_writable`, `can_install`, instructions and independent `latest` metadata.
+`decky plugin-status` works with root-owned `~/homebrew/plugins`. Its main fields:
+
+```json
+{"installed":false,"version":null,"available_version":"0.1.0","source":"bundled","methods":["decky_api","password"],"can_install":true}
+```
+
+It also returns `decky_installed`, `plugins_writable`, instructions and `latest`
+metadata. `source` is `bundled` or `channel`. `can_install` needs installed Decky
+and an available artifact, rather than write permission to the plugins directory.
 It queries GitHub releases (up to ten 100-item pages within the network budget),
 selecting the highest stable `decky-vMAJOR.MINOR.PATCH` with a matching
 `deckcompanion-decky-<version>.zip`, repository HTTPS URL, size at most 8 MiB and
 GitHub `sha256:` digest. Engine/prerelease tags are ignored. This has a separate
-six-hour cache and stale fallback. Before a plugin release exists, it reports
-`source: unavailable` and `can_install: false`.
+six-hour cache and stale fallback. The newer version wins; equal versions prefer
+the local bundle. Before a plugin release exists, the bundle supplies installation
+without a separate download or publication. A source checkout without a bundle
+or channel artifact reports `can_install: false`.
 
-`decky plugin-install` checks the downloaded SHA256 before writes. It requires
-installed Decky and existing user-writable `~/homebrew/plugins`. It extracts only
-expected files with an expansion limit and matching package version. No root,
-chmod/chown or password handling. Modified/unowned plugins are preserved with
-`reason: existing_plugin_preserved`. Engine-managed updates verify the old receipt,
-retain `.DeckCompanion-previous-<timestamp>`, and roll back on activation/receipt
-failure. Bytecode caches do not count as edits. `changed` distinguishes update/no-op;
-reload plugins in Decky after success. Receipt: `decky-plugin-installed.json` in the
-engine data directory. Engine versions, recipes and the current pointer are untouched.
-Root-owned installed plugins can instead use the explicit `decky update-plugins`
-command above. Decky's developer **Install Plugin from ZIP** remains an alternative.
+`decky plugin-install` verifies SHA256, archive paths and metadata before asking
+the running Loader to install. Decky's own confirmation appears in Steam Game Mode;
+no password or Desktop Mode is needed. It polls the installed version for 15 seconds.
+Request acceptance is distinct from installation:
 
-Build the plugin separately under `decky-v<version>`; it never enters an engine
-tarball or requires an engine version bump. See `decky-plugin/README.md` for builds,
-verified dependency versions and open hardware checks.
+```json
+{"method":"decky_api","requested":true,"confirm_in_steam":true,"installed":false,"changed":false,"reason":"confirmation_pending"}
+```
+
+The full response includes the status fields. After observed installation it reports
+`installed: true`, the installed `version`, and `changed: true`. A pending result
+means return to Steam to confirm, then refresh `plugin-status`; it does not claim
+success or cancellation. Pending updates keep the previous installed version and
+`installed: true`, with `changed: false`. A failed request reports `requested: false`,
+`confirm_in_steam: false`, `reason: decky_api_unavailable`. Equal/newer installed
+versions are no-ops. Downloads/metadata and API transport have separate timeouts.
+If the request acknowledgement is lost, `decky_api_request_failed` asks the caller
+to inspect Steam and `plugin-status` before retrying; it never silently resubmits.
+
+The local adapter gets `/auth/token` from `127.0.0.1:1337` (memory only), then uses
+authenticated `POST /methods/execute_in_tab` to call
+`window.DeckyBackend.call('utilities/install_plugin', artifact, 'DeckCompanion', version, sha256, install_type)`
+in Steam's existing context. Install type is 0 for install or 2 for update. A direct
+second `/ws` connection would evict Steam and lose its confirmation event. The
+channel artifact uses its HTTPS URL; Decky downloads it and checks the hash itself.
+The bundle uses a verified, hash-addressed `file://` snapshot in the engine cache,
+retained for deferred confirmation. Decky supports local files, so no temporary
+HTTP server, port or serving process is required.
+
+Verified against Decky **v3.3.1**:
+[token route](https://github.com/SteamDeckHomebrew/decky-loader/blob/v3.3.1/backend/decky_loader/main.py#L174-L175),
+[HTTP auth](https://github.com/SteamDeckHomebrew/decky-loader/blob/v3.3.1/backend/decky_loader/helpers.py#L38-L53),
+[legacy HTTP adapter](https://github.com/SteamDeckHomebrew/decky-loader/blob/v3.3.1/backend/decky_loader/utilities.py#L37-L107),
+[install arguments](https://github.com/SteamDeckHomebrew/decky-loader/blob/v3.3.1/backend/decky_loader/utilities.py#L123-L138),
+[Steam evaluation](https://github.com/SteamDeckHomebrew/decky-loader/blob/v3.3.1/backend/decky_loader/utilities.py#L231-L253),
+[single websocket](https://github.com/SteamDeckHomebrew/decky-loader/blob/v3.3.1/backend/decky_loader/wsrouter.py#L81-L99),
+[local ZIP/URL handling](https://github.com/SteamDeckHomebrew/decky-loader/blob/v3.3.1/backend/decky_loader/browser.py#L195-L209),
+[hash verification](https://github.com/SteamDeckHomebrew/decky-loader/blob/v3.3.1/backend/decky_loader/browser.py#L57-L64),
+[confirmation request](https://github.com/SteamDeckHomebrew/decky-loader/blob/v3.3.1/backend/decky_loader/browser.py#L309-L326).
+
+`decky plugin-install --password-file F` is the explicit fallback when the local
+API or Steam context is unavailable. It consumes/deletes the password file before
+network/process work, passes the password only to `sudo -S` on stdin, and uses the
+same verified archive and isolated root helper as plugin updates. New installs
+rename a complete staged directory into `~/homebrew/plugins/DeckCompanion`; updates
+use Linux atomic directory exchange and keep the old directory for recovery. Then
+`sudo systemctl restart plugin_loader` reloads Decky. Steam is not restarted.
+The result includes `method: password`, `changed` and `loader_restarted`.
+If the API is unavailable and the plugins directory is user-writable, the existing
+non-root installer is retained: modified/unowned plugins are preserved, receipts
+are verified, `.DeckCompanion-previous-*` is retained, and activation failures roll
+back. Engine versions, recipes and the current pointer are untouched.
+
+Engine release builds invoke `scripts/build_decky_plugin.py`'s packager and include
+`bundled/decky/deckcompanion-decky-<version>.zip` plus `bundled/decky/plugin.json`
+with version, filename, size and SHA256. Missing frontend/dependency build output
+fails the release build clearly; first run `npm ci --ignore-scripts` and
+`npm run build` in `decky-plugin/`. This fallback does not publish a `decky-v` tag
+or couple future plugin updates to engine releases. See `decky-plugin/README.md`.
 
 ## Update notifications
 
@@ -363,12 +421,12 @@ survives retries even if Steam restores only an obsolete mapping or image.
   or `{"action":"default_off"}` without an appid for a queued global change.
   `last_apply` is null before a helper run, then the content of `logs/apply-last.json`.
 
-- `settings --json` -> `{"splash":true,"splash_seconds":4.0,"splash_parallel":false,"show_games_without_recipe":true,"check_updates_on_start":true,"auto_install_ge":true,"cleanup_old_ge":true,"takeover_all":true,"prefer_community_fixes":true}`.
+- `settings --json` -> `{"splash":true,"splash_seconds":4.0,"splash_parallel":false,"show_games_without_recipe":true,"check_updates_on_start":true,"auto_install_ge":true,"cleanup_old_ge":true,"takeover_all":true,"prefer_community_fixes":true,"decky_plugin_auto":true}`.
   Returns all persisted settings plus defaults; reading does not write the state file.
   `settings --set key=value [--set key=value ...] --json` validates all entries before
   saving. Boolean keys `splash`, `show_games_without_recipe`,
   `check_updates_on_start`, `auto_install_ge`, `cleanup_old_ge`, `takeover_all` and
-  `prefer_community_fixes` accept true/false or on/off; all default on. Numeric
+  `prefer_community_fixes`, `decky_plugin_auto` accept true/false or on/off; all default on. Numeric
   `splash_seconds` defaults to 4 and clamps finite numbers to 1–10. Unknown keys,
   malformed entries, invalid booleans and nonfinite numbers fail without partial writes.
   `settings --splash on|off --splash-seconds N --json` updates either or both values

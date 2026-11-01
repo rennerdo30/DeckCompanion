@@ -19,7 +19,7 @@ HARD_TIMEOUT = 130
 DEFAULTS = {"splash": True, "splash_seconds": 4.0, "splash_parallel": False,
             "show_games_without_recipe": True, "check_updates_on_start": True,
             "auto_install_ge": True, "cleanup_old_ge": True, "takeover_all": True,
-            "prefer_community_fixes": True}
+            "prefer_community_fixes": True, "decky_plugin_auto": True}
 
 
 def settings(data):

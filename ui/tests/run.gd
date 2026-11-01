@@ -431,7 +431,7 @@ func settings_checks(ui: Node) -> void:
 	ui.decky_dialog.confirmed.emit()
 	ui.decky_dialog.hide()
 	await create_timer(0.8).timeout
-	check(ui.notice.contains("updated ProtonDB Badges") and ui.notice.contains("SteamGridDB could not be updated") and ui.notice.contains("Steam restarts"),"plugin results name what updated and what failed")
+	check(ui.notice.contains("updated ProtonDB Badges") and ui.notice.contains("SteamGridDB could not be updated") and ui.notice.contains("Decky Loader restarted"),"plugin results name what updated and what failed")
 	check(ui.decky_pending_password.is_empty(),"plugin update does not keep the password")
 	control(ui,"plugin_install").pressed.emit()
 	await create_timer(0.6).timeout

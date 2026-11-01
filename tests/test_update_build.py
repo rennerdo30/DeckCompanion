@@ -150,7 +150,7 @@ def builder_module():
     return module
 
 
-def test_release_build_bundles_fallback_without_resolving_upstream(tmp_path):
+def test_release_build_bundles_fallback_without_resolving_upstream(tmp_path, built_plugin):
     build = builder_module()
     result = build.build(tmp_path / "release")
     index_data = read_json(Path(result["index"]))

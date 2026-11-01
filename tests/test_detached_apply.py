@@ -300,7 +300,7 @@ def test_install_running_queues_files_and_png_icon(paths, tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize("with_payload", [False, True])
-def test_release_includes_optional_ui_and_logo(tmp_path, monkeypatch, with_payload):
+def test_release_includes_optional_ui_and_logo(tmp_path, monkeypatch, with_payload, built_plugin):
     spec = importlib.util.spec_from_file_location("dc_build", ROOT / "scripts/build_release.py")
     builder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(builder)

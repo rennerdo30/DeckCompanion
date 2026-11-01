@@ -11,18 +11,27 @@ import tarfile
 import tempfile
 import time
 import tomllib
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT)]
 os.environ["PYTHONPATH"] = os.pathsep.join([str(ROOT / "src"), str(ROOT)])
 from deckcompanion import __version__, net, recipes
 from deckcompanion.common import Error, atomic, component, write_json
+from scripts.build_decky_plugin import build as build_plugin
 
 
 def build(output, version=__version__, offline=False):
     version = component(version)
     if version != __version__:
         raise Error("version_mismatch", "Bump src/deckcompanion/__init__.py before building another version")
+    # A release must have a working first-install fallback, even before decky-v tags.
+    # The existing packager deliberately fails if npm's frontend output is absent.
+    plugin = build_plugin(ROOT)
+    with zipfile.ZipFile(plugin) as bundle:
+        plugin_version = json.loads(bundle.read("DeckCompanion/package.json"))["version"]
+    plugin_metadata = {"version": plugin_version, "file": plugin.name,
+                       "sha256": net.digest(plugin), "size": plugin.stat().st_size}
     output.mkdir(parents=True, exist_ok=True)
     archive = output / f"deckcompanion-{version}.tar.gz"
     base = f"https://github.com/rennerdo30/DeckCompanion/releases/download/v{version}/"
@@ -34,6 +43,11 @@ def build(output, version=__version__, offline=False):
             recipes.validate(tomllib.loads(text), path.stem)
             entries[path.stem] = {"toml": text, "sha256": hashlib.sha256(text.encode()).hexdigest()}
         with tarfile.open(archive, "w:gz") as tar:
+            tar.add(plugin, arcname="bundled/decky/" + plugin.name)
+            payload = json.dumps(plugin_metadata).encode("utf-8")
+            info = tarfile.TarInfo("bundled/decky/plugin.json")
+            info.size, info.mode = len(payload), 0o644
+            tar.addfile(info, io.BytesIO(payload))
             def include(info):
                 # Development-only upstream sources and their nested dependencies never ship,
                 # even if a future payload root includes a third_party directory.

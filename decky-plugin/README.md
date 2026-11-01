@@ -2,7 +2,8 @@
 
 Optional Quick Access Menu panel backed by the installed DeckCompanion JSON CLI.
 Version **0.1.0** has its own tag **decky-v0.1.0** and asset
-**deckcompanion-decky-0.1.0.zip**, separate from engine tarballs.
+**deckcompanion-decky-0.1.0.zip**. Engine tarballs carry a first-install fallback;
+newer `decky-v*` releases update it independently.
 The build does not publish a release or submit to the Decky store.
 When the owner publishes this tag, set GitHub's **Set as the latest release** off
 (`make_latest: false`): engine bootstrap URLs still use
@@ -44,18 +45,15 @@ The Python adapter runs `~/.local/share/deckcompanion/bin/deckcompanion`, using
 
 ## Install and update
 
-Once an owner-approved `decky-v<version>` GitHub release and versioned ZIP exist,
-run `deckcompanion decky plugin-status --json`, then
-`deckcompanion decky plugin-install --json`. The engine selects the latest stable
-plugin independently of engine versions and verifies GitHub's asset SHA256 digest.
-Before the first plugin release it reports unavailable.
-
-Decky must be installed and `~/homebrew/plugins` user-writable. For a root-owned
-directory use Decky's supported path: enable developer options in Decky Settings,
-choose **Install Plugin from ZIP**, and select the downloaded versioned ZIP.
-No chmod/chown, sudo copying or passwords are used by DeckCompanion. Reload plugins
-afterwards. Manually installed/edited plugins stay intact; update those through Decky.
-Engine-managed updates retain a previous copy for recovery.
+Run `deckcompanion decky plugin-status --json`, then
+`deckcompanion decky plugin-install --json` and confirm in Steam. The engine selects
+the newer bundled or stable channel plugin and verifies SHA256. Decky's local
+backend handles root-owned plugin directories; no Desktop Mode is needed.
+`decky plugin-install --password-file F` supplies an explicit sudo fallback and
+restarts only `plugin_loader`. Password files are consumed/deleted immediately.
+Loader installs and plugin updates install a missing panel by default; disable
+that with `settings --set decky_plugin_auto=off`. See [CLI contracts](../docs/cli.md#decky-loader-and-independent-plugin)
+for pending-request results, archive safety, retained backups and v3.3.1 research.
 
 ## Panel
 

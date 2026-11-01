@@ -328,7 +328,7 @@ def test_bad_cached_catalog_falls_back_and_logs_source(paths, caplog, broken):
     assert "using bundled" in caplog.text and "source: bundled" in caplog.text
 
 
-def test_bundled_catalog_survives_install_payload_and_release(tmp_path, monkeypatch):
+def test_bundled_catalog_survives_install_payload_and_release(tmp_path, monkeypatch, built_plugin):
     import importlib.util
     import tarfile
     from deckcompanion import install

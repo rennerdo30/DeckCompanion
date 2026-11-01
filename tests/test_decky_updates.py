@@ -82,8 +82,9 @@ def root_process(monkeypatch, calls, secret):
             assert "test-only-secret" not in str(command)
             assert kwargs["stdout"] == decky.subprocess.DEVNULL
             calls.append(command)
+            self.restart = command[-3:] == ["systemctl", "restart", "plugin_loader"]
         def communicate(self, input=None, timeout=None):
-            assert input == "test-only-secret\n" and timeout == 120
+            assert input == "test-only-secret\n" and timeout == (30 if self.restart else 120)
     monkeypatch.setattr(decky.subprocess, "Popen", Proc)
 
 
@@ -127,10 +128,11 @@ def test_update_plugins_cli_deletes_password_and_restarts_only_after_change(path
     secret = password(tmp_path)
     root_calls, restarted = [], []
     root_process(monkeypatch, root_calls, secret)
-    monkeypatch.setattr(decky, "restart_steam", lambda: restarted.append(True))
+    monkeypatch.setattr(decky, "restart_steam", lambda: pytest.fail("Plugin update must not restart Steam"))
+    monkeypatch.setattr(decky, "restart_loader", lambda password: restarted.append(True))
     assert cli.main(["decky", "update-plugins", "--password-file", str(secret), "--json"]) == 0
     output = capsys.readouterr().out
-    assert json.loads(output) == {"plugins_updated": ["ProtonDB Badges"], "plugins_failed": [], "steam_restarting": True}
+    assert json.loads(output) == {"plugins_updated": ["ProtonDB Badges"], "plugins_failed": [], "steam_restarting": False, "loader_restarted": True}
     assert not secret.exists() and restarted == [True]
     assert "test-only-secret" not in output + caplog.text
     assert decky.INSTALLER_URL not in calls and root_calls
@@ -139,7 +141,7 @@ def test_update_plugins_cli_deletes_password_and_restarts_only_after_change(path
     # Equal/newer installed versions are never downgraded or restarted.
     plugins("old", version="2.0.0")
     result = decky.update_plugins_with_password(paths, password(tmp_path))
-    assert result == {"plugins_updated": [], "plugins_failed": [], "steam_restarting": False}
+    assert result == {"plugins_updated": [], "plugins_failed": [], "steam_restarting": False, "loader_restarted": False}
     assert len(root_calls) == 1 and restarted == [True]
 
 
@@ -253,7 +255,7 @@ def test_root_failure_keeps_plugin_and_never_restarts_or_exposes_inputs(paths, p
     monkeypatch.setattr(decky, "restart_steam", lambda: pytest.fail("failed plugin triggered restart"))
     result = decky.update_plugins_with_password(paths, secret)
     assert result == {"plugins_updated": [], "plugins_failed": [{"name": "ProtonDB Badges", "error":
-                      "plugin_timeout" if mode == "timeout" else "plugin_install_failed"}], "steam_restarting": False}
+                      "plugin_timeout" if mode == "timeout" else "plugin_install_failed"}], "steam_restarting": False, "loader_restarted": False}
     assert "test-only-secret" not in str(result)
     assert read_json(root / "package.json")["version"] == "1.2.0"
     assert bool(killed) == (mode == "timeout")

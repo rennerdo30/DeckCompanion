@@ -22,7 +22,7 @@ var default_pending = null
 var removed_pending: Array = []
 var worker: Thread
 var active := ""
-var settings := {"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true,"auto_install_ge":true,"cleanup_old_ge":true,"splash_parallel":false,"takeover_all":true,"prefer_community_fixes":true}
+var settings := {"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true,"auto_install_ge":true,"cleanup_old_ge":true,"splash_parallel":false,"takeover_all":true,"prefer_community_fixes":true,"decky_plugin_auto":true}
 var proton_builds: Array = [{"name":"GE-Proton11-11","state":"wanted","installed":false,"wanted_by":["Farming Simulator 25"],"latest":true},{"name":"GE-Proton11-7","state":"installed","installed":true,"installed_bytes":1717986918,"removable":true}]
 var proton_ticks := 0
 
@@ -220,7 +220,7 @@ func mock_response(command: String, args: Array = []) -> Dictionary:
 		match args[0]:
 			"update-plugins":
 				mock_plugins_updated = true
-				return {"plugins_updated": ["ProtonDB Badges"], "plugins_failed": [{"name": "SteamGridDB", "error": "checksum_mismatch"}], "steam_restarting": true}
+				return {"plugins_updated": ["ProtonDB Badges"], "plugins_failed": [{"name": "SteamGridDB", "error": "checksum_mismatch"}], "steam_restarting": false,"loader_restarted":true}
 			"status": return {"installed": true, "version": "v3.2.8", "service": "active", "password_set": mock_password_set, "plugins": [] if mock_plugins_updated else [{"dir":"protondb-decky","name":"ProtonDB Badges","installed":"1.2.0","latest":"1.3.4","update_available":true},{"dir":"decky-steamgriddb","name":"SteamGridDB","installed":"1.7.1","latest":"1.8.1","update_available":true}], "latest": {"version": "v3.3.1", "source": "github", "stale": false}}
 			"set-password":
 				mock_password_set = true
@@ -229,7 +229,7 @@ func mock_response(command: String, args: Array = []) -> Dictionary:
 			"install":
 				if args.size() > 2: return {"installed": true, "version": "v3.3.1", "steam_restarting": true}
 				return {"needs_desktop": true, "launched": false, "command": "curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh | sh", "instructions": ["Switch to Desktop Mode.", "Open Konsole and run the command.", "Enter your sudo password when the official installer asks."]}
-			"plugin-status": return {"installed": mock_plugin, "version": "0.1.0" if mock_plugin else null, "decky_installed": true, "plugins_writable": true, "can_install": true, "instructions": "Use Decky Settings > Developer > Install Plugin from ZIP if this directory is not writable.", "latest": {"version": "0.1.0", "source": "github", "stale": false}}
+			"plugin-status": return {"installed": mock_plugin, "version": "0.1.0" if mock_plugin else null, "available_version":"0.1.0","source":"bundled","methods":["decky_api","password"],"decky_installed": true, "plugins_writable": false, "can_install": true, "instructions": "Confirm installation in Steam.", "latest": {"version": "0.1.0", "source": "bundled", "stale": false}}
 			"plugin-install":
 				mock_plugin = true
 				return {"changed": true, "version": "0.1.0"}

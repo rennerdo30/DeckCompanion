@@ -310,7 +310,7 @@ def builder(name):
     return module
 
 
-def test_engine_builder_never_resolves_or_publishes_content(tmp_path):
+def test_engine_builder_never_resolves_or_publishes_content(tmp_path, built_plugin):
     build = builder("build_release")
     result = build.build(tmp_path / "engine")  # no network mock: fixture denies it.
     assert read_json(Path(result["index"]))["recipes"] == {}

@@ -512,11 +512,20 @@ func _decky_completed(_command: String, data: Dictionary) -> void:
 		else: notice = "Open Desktop Mode to install Decky; the installer needs your password."
 	elif action == "update-plugins":
 		var result := _plugin_result(data).trim_prefix("; ")
-		notice = ("Decky plugins: " + result + "." if result != "" else "Decky plugins are up to date.") + (" Steam restarts now." if data.get("steam_restarting",false) else "")
+		notice = ("Decky plugins: " + result + "." if result != "" else "Decky plugins are up to date.") + (" Steam restarts now." if data.get("steam_restarting",false) else " Decky Loader restarted." if data.get("loader_restarted",false) else "")
 		decky_status.erase("plugins")
 		_refresh_updates()
 	elif action == "plugin-install":
-		notice = "DeckCompanion plugin %s. Reload plugins in Decky." % ("installed" if data.get("changed",false) else "is already up to date")
+		if data.get("reason") == "decky_api_unavailable":
+			decky_action = "plugin-install"
+			_open_decky_dialog("Decky's install request is unavailable. Use your Deck password instead.")
+			return
+		if data.get("requested",false) and not data.get("changed",false):
+			notice = "Return to Steam to confirm the DeckCompanion plugin install, then refresh here."
+		elif data.get("reason","") != "":
+			notice = "DeckCompanion plugin could not be installed. Refresh to check Decky."
+		else:
+			notice = "DeckCompanion plugin installed." if data.get("changed",false) else "DeckCompanion plugin is already up to date."
 		_request_decky("plugin-status")
 		return
 	if action == "status": _request_decky.call_deferred("plugin-status")
@@ -562,7 +571,7 @@ func _decky_card(column: Node) -> void:
 		if plugin_status.get("can_install",false) and plugin_newer:
 			_chip("Update" if plugin_status.get("installed",false) else "Install",func(): _request_decky("plugin-install"),plugin_row,"plugin_install",false,MINT,not decky_backend.busy).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		elif plugin_newer and not plugin_status.get("can_install",false):
-			_paragraph(card,"Install it from Decky's settings: Developer › Install Plugin from ZIP.",MUTED,15)
+			_paragraph(card,"Install Decky Loader first, then install the DeckCompanion plugin here.",MUTED,15)
 
 static func _version_less(a: String, b: String) -> bool:
 	var pa := a.split(".")
@@ -637,6 +646,7 @@ func _open_decky_dialog(problem: String) -> void:
 	decky_creating = decky_status.get("password_set") == false
 	var installed: bool = decky_status.get("installed",false)
 	var action := "Update" if installed else "Install"
+	if decky_action == "plugin-install": action = "Install"
 	var plugin_count := _plugin_updates().size()
 	var plugin_note := "" if plugin_count == 0 else (" Your %d plugin%s with updates get updated too." % [plugin_count,"" if plugin_count == 1 else "s"])
 	if decky_creating:
@@ -644,8 +654,11 @@ func _open_decky_dialog(problem: String) -> void:
 		decky_dialog.ok_button_text = "Set password and " + ("update" if decky_action == "update-plugins" else action.to_lower())
 	else:
 		if decky_action == "update-plugins":
-			_dialog_text(decky_dialog,"Update Decky plugins","Decky plugins are system files, so SteamOS asks for your Deck password once. DeckCompanion updates %d plugin%s from the Decky store, restarts Steam and never stores the password." % [plugin_count,"" if plugin_count == 1 else "s"])
+			_dialog_text(decky_dialog,"Update Decky plugins","Decky plugins are system files, so SteamOS asks for your Deck password once. DeckCompanion updates %d plugin%s, restarts Decky Loader and never stores the password." % [plugin_count,"" if plugin_count == 1 else "s"])
 			decky_dialog.ok_button_text = "Update"
+		elif decky_action == "plugin-install":
+			_dialog_text(decky_dialog,"Install DeckCompanion plugin","Enter your Deck password to install the verified plugin and restart Decky Loader. Steam stays open. The password is never stored.")
+			decky_dialog.ok_button_text = "Install"
 		else:
 			_dialog_text(decky_dialog,"%s Decky Loader" % action,"Decky Loader installs as a system service, so SteamOS asks for your Deck password once. DeckCompanion passes it only to the official installer and never stores it." + plugin_note)
 			decky_dialog.ok_button_text = action
@@ -694,7 +707,7 @@ func _request_decky_secret(action: String) -> void:
 	file.store_string(decky_pending_password)
 	file.close()
 	if action != "set-password": decky_pending_password = ""
-	notice = {"set-password": "Setting your Deck password…", "update-plugins": "Updating Decky plugins…"}.get(action, "Installing Decky Loader…")
+	notice = {"set-password": "Setting your Deck password…", "update-plugins": "Updating Decky plugins…", "plugin-install": "Installing DeckCompanion plugin…"}.get(action, "Installing Decky Loader…")
 	decky_backend.set_meta("action",action)
 	if not decky_backend.request("decky",[action,"--password-file",path]):
 		# Not accepted (busy): never leave the password behind on disk.
