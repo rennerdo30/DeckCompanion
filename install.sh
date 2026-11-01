@@ -61,12 +61,12 @@ PY
 else
   PYTHONPATH="$root/src:$root" timeout 30s python3 -m deckcompanion install --source "$root" "$@"
 fi
-printf '%s\n' 'Install complete. With Steam closed, apply the queued UI shortcut using:'
+printf '%s\n' 'Install complete. Apply pending Steam changes now (Steam will restart), or later using:'
 printf '%s\n' '  ~/.local/share/deckcompanion/bin/deckcompanion apply --restart-steam'
 if [ -t 0 ]; then
-  printf 'Apply queued changes and start Steam now? [y/N] '
+  printf 'Apply now and restart Steam? [y/N; N = later] '
   read -r answer
   case "$answer" in
-    y|Y) "${DECKCOMPANION_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/deckcompanion}/bin/deckcompanion" apply --restart-steam ;;
+    y|Y) timeout 30s "${DECKCOMPANION_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/deckcompanion}/bin/deckcompanion" apply --restart-steam ;;
   esac
 fi

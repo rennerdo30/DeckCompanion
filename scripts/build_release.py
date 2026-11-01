@@ -97,6 +97,9 @@ def build(output, version=__version__, offline=False):
             ui = ROOT / "bin/deckcompanion-ui"
             if ui.is_file():
                 tar.add(ui, arcname="bin/deckcompanion-ui", filter=include)
+            logo = ROOT / "assets/logo"
+            if logo.is_dir():
+                tar.add(logo, arcname="assets/logo", filter=include)
         sha = net.digest(archive)
         index = {"schema_version": 1, "engine": {"version": version, "url": base + archive.name, "sha256": sha}, "recipes": entries}
         write_json(output / "index.json", index)

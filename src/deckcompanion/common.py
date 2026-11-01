@@ -91,9 +91,9 @@ def write_json(path, obj):
 
 
 @contextmanager
-def locked(paths):
+def locked(paths, name="state.lock"):
     paths.data.mkdir(parents=True, exist_ok=True)
-    with (paths.data / "state.lock").open("a+b") as lock:
+    with (paths.data / name).open("a+b") as lock:
         try:
             if os.name == "nt":
                 import msvcrt

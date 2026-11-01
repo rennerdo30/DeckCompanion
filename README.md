@@ -6,7 +6,7 @@ text and binary formats. Target: SteamOS 3.9. Project license: MIT, rennerdo30.
 
 ## Install (Desktop Mode)
 
-Close Steam first. Download `DeckCompanion-Installer.desktop` from a reviewed
+Steam can remain running during installation. Download `DeckCompanion-Installer.desktop` from a reviewed
 release, mark it executable if Desktop Mode requests it, and double-click. It
 gets `install.sh` over HTTPS with timeouts. The standalone installer retrieves
 an index, verifies the engine SHA256, and installs without root, pacman, pip,
@@ -18,11 +18,22 @@ From an extracted release or checkout, run `sh install.sh`. The engine lives in
 Steam's `compatibilitytools.d/DeckCompanion/` and a CLI at
 `~/.local/share/deckcompanion/bin/deckcompanion`. A release containing
 `bin/deckcompanion-ui` also installs its launcher and queues a non-Steam shortcut.
-The installer asks to apply the queue and start Steam; alternatively run:
+Optional `assets/logo/` files install with the engine; the shortcut uses
+`deckcompanion-icon-256.png` when present. The installer offers to apply now and
+restart Steam, or leave changes queued for later. Non-interactive installs print
+the command without restarting Steam:
 
 ```sh
 ~/.local/share/deckcompanion/bin/deckcompanion apply --restart-steam --json
 ```
+
+On Linux while Steam runs, apply hands off to a detached user service and returns
+`scheduled: true` immediately, so a UI launched by Steam can safely exit. The helper
+waits up to 120 seconds for Steam, writes queued changes with backups, then restores
+Game Mode or starts Steam in Desktop Mode. `status --json` exposes its result in
+`last_apply`; scheduling alone does not confirm success. See the
+[helper lifecycle and detection](docs/cli.md#detached-linux-apply). With Steam
+already closed, apply writes immediately. Device behavior is **not verified on hardware**.
 
 Select DeckCompanion as a game's compatibility tool in Steam, or use the UI to
 enable games and apply changes. Engine-only releases work without a UI. No PATH
@@ -56,7 +67,7 @@ The root `DeckCompanion` and `toolmanifest.vdf` command path remain. Old git-clo
 installs receiving this revision use a migration shim on their next invocation:
 it executes the installed engine, or falls back to installed Proton while logging
 how to run `install.sh`. No old scripts or self-updates run in the shim. Install
-with Steam closed. The installer preserves the clone's Git metadata and tracked
+while Steam runs if desired, then apply queued Steam changes. The installer preserves the clone's Git metadata and tracked
 compatibility launcher, rather than deleting or overwriting that checkout.
 
 An already-running old launcher may finish its old code after its last `git pull`;
@@ -81,7 +92,9 @@ network/process calls. No Steam or remote device needed.
 `python3 scripts/build_release.py --output dist` resolves API metadata and produces
 engine/index/checksums and installer assets locally; nothing publishes.
 `--offline` produces a development bundle with unresolved source mods (not installable
-until a resolved index is fetched). Optional exported UI input: `bin/deckcompanion-ui`.
+until a resolved index is fetched). Optional exported UI input: `bin/deckcompanion-ui`;
+the release builder also includes `assets/logo/` when present. The parent supplies
+the PNG icon; no image conversion is performed by the engine.
 
 ## Not verified on hardware
 
@@ -92,6 +105,6 @@ controller UX and game/mod behavior are **not verified on hardware**.
 Documents outside a prefix are refused and logged. SHA256 trusts the HTTPS index;
 publisher signature verification is designed but not implemented.
 
-Use reviewed recipes/releases, back up saves, close Steam before disk integration,
+Use reviewed recipes/releases, back up saves, apply queued Steam changes through the CLI,
 and try disposable prefixes first. No `sudo`, system partition writes, telemetry,
 credential access or automatic uploads are required.

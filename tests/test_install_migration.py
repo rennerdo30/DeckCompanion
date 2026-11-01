@@ -29,7 +29,7 @@ def source(tmp_path, monkeypatch):
 def test_idempotent_install_queue_ui_and_uninstall_preserves_foreign_files(paths, source):
     atomic(source / "bin/deckcompanion-ui", b"fake UI binary")
     assert install.install(paths, source) == {"installed": True, "version": __version__, "shortcut_pending": True,
-        "restart_required": True, "legacy_tool_preserved": False}
+        "restart_required": True, "legacy_tool_preserved": False, "steam_changes_pending": True}
     assert update.current(paths) == __version__
     cli_file = paths.data / "bin/deckcompanion"
     assert 'main(sys.argv[1:])' in cli_file.read_text()
@@ -66,15 +66,14 @@ def test_idempotent_install_queue_ui_and_uninstall_preserves_foreign_files(paths
     assert not (paths.data / "versions" / __version__).exists()
 
 
-def test_legacy_clone_preserved_and_running_refused(paths, source, monkeypatch):
+def test_legacy_clone_preserved_install_running_and_uninstall_refused(paths, source, monkeypatch):
     compat = paths.tools / "DeckCompanion"
     atomic(compat / ".git", "gitdir: original")
     atomic(compat / "DeckCompanion", "old migration entry")
     assert install.install(paths, source)["legacy_tool_preserved"] is True
     assert (compat / "DeckCompanion").read_text() == "old migration entry"
     monkeypatch.setattr(steam, "running", lambda: True)
-    with pytest.raises(Error, match="Close Steam"):
-        install.install(paths, source)
+    assert install.install(paths, source)["steam_changes_pending"] is False
     with pytest.raises(Error, match="Close Steam"):
         install.uninstall(paths)
 

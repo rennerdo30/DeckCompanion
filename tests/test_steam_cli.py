@@ -70,6 +70,7 @@ def test_binary_shortcut_round_trip(paths, monkeypatch):
 
 
 def test_refuse_running_and_shutdown_timeout(paths, monkeypatch):
+    monkeypatch.setattr(steam.sys, "platform", "win32")  # In-process dev behavior stays intact.
     monkeypatch.setattr(steam, "running", lambda: True)
     with pytest.raises(Error, match="Close Steam"):
         steam.guarded_write(paths.steam / "config/config.vdf", b"bad")
@@ -123,7 +124,8 @@ def test_cli_shapes_and_errors(paths, monkeypatch, capsys):
     assert isinstance(detail["log_tail"], list) and len(detail["log_tail"]) == 200
     assert detail["log_tail"][0] == "30"
     assert "notes" in detail
-    assert set(invoke(capsys, "status")[1]) == {"version", "steam_running", "pending", "proton"}
+    assert set(invoke(capsys, "status")[1]) == {"version", "steam_running", "pending", "proton", "last_apply"}
+    assert invoke(capsys, "status")[1]["last_apply"] is None
     code, error = invoke(capsys, "enable", "../bad")
     assert code == 1 and error["error"]["code"] == "invalid_appid"
     assert invoke(capsys, "missing")[1]["error"]["code"] == "invalid_arguments"

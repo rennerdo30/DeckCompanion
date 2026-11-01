@@ -4,7 +4,7 @@ from collections import deque
 import json
 import sys
 from . import __version__, recipes, steam
-from .common import Error, Paths, app_id, locked, state, save_state
+from .common import Error, Paths, app_id, locked, read_json, state, save_state
 
 
 def game(paths, ident):
@@ -48,6 +48,9 @@ def parser():
     launch.add_argument("--json", action="store_true")
     launch.add_argument("verb")
     launch.add_argument("cmd", nargs=argparse.REMAINDER)
+    helper = commands.add_parser("apply-helper", help="internal detached Steam apply worker")
+    helper.add_argument("--json", action="store_true")
+    helper.add_argument("--game-mode", action="store_true")
     for name in ("install", "uninstall"):
         sub = commands.add_parser(name)
         sub.add_argument("--json", action="store_true")
@@ -98,7 +101,8 @@ def execute(args, paths):
     if name == "status":
         return {"version": __version__, "steam_running": steam.running(),
                 "pending": [{"appid": ident, "action": item["pending"]} for ident, item in data["games"].items() if item.get("pending")],
-                "proton": steam.proton(paths)}
+                "proton": steam.proton(paths),
+                "last_apply": read_json(paths.data / "logs/apply-last.json")}
     raise Error("unknown_command", name)
 
 
@@ -110,10 +114,18 @@ def main(argv=None):
             from .launch import launch
             launch(paths, args.verb, args.cmd)
             return 0
-        with locked(paths):
-            result = execute(args, paths)
+        if args.command == "apply-helper":
+            from .apply_helper import apply_helper
+            result = apply_helper(paths, args.game_mode)
+        elif args.command == "apply" and args.restart_steam and sys.platform.startswith("linux") and steam.running():
+            # Never hold state.lock while starting a helper which will need it.
+            from .apply_helper import schedule
+            result = schedule(paths)
+        else:
+            with locked(paths):
+                result = execute(args, paths)
         print(json.dumps(result, ensure_ascii=False))
-        return 0
+        return 1 if result.get("errors") else 0
     except Exception as exc:
         print(json.dumps({"error": {"code": getattr(exc, "code", "operation_failed"), "message": str(exc)}}))
         return 1

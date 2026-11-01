@@ -34,6 +34,9 @@ SHA256. Repeated runtime pins share one API response. `--offline` builds a
 development bundle with unresolved source mods (visible but not installable).
 The engine archive bundles baseline recipes; the resolved index is activated by
 `update`. Nothing publishes. If `bin/deckcompanion-ui` is present, it is included;
-the builder never reads or modifies the sibling's `ui/` tree.
+`assets/logo/` is included when present too, including the optional 256px PNG used
+by the installed non-Steam shortcut. Install queues the shortcut while Steam runs;
+only apply writes Steam VDF files. See the [CLI lifecycle](cli.md).
+The builder never reads or modifies the sibling's `ui/` tree.
 
 Not verified on hardware. Tests use fake tarballs and mocked release responses.

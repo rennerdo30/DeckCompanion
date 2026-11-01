@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import time
 import zlib
 import vdf
@@ -135,8 +136,12 @@ def shortcut_bytes(paths, path, remove=False):
     ident = unsigned - 0x100000000  # Steam interprets the signed VDF int32 bits as uint32.
     entries = [e for e in entries if not (e.get("appid") == ident and e.get("Exe") == exe)]
     if not remove:
+        from . import update
+        version = update.current(paths)
+        icon = paths.data / "versions" / version / "assets/logo/deckcompanion-icon-256.png" if version else None
         entries.append({"appid": ident, "AppName": "DeckCompanion", "Exe": exe,
-                        "StartDir": '"' + str(paths.data / "bin") + '"', "icon": "", "LaunchOptions": "",
+                        "StartDir": '"' + str(paths.data / "bin") + '"',
+                        "icon": str(icon) if icon and icon.is_file() else "", "LaunchOptions": "",
                         "IsHidden": 0, "AllowDesktopConfig": 1, "AllowOverlay": 1, "tags": {}})
     doc["shortcuts"] = {str(i): item for i, item in enumerate(entries)}
     return vdf.binary_dumps(doc)
@@ -154,6 +159,9 @@ def apply(paths, restart=False):
     if running():
         if not restart:
             raise Error("steam_running", "Use apply --restart-steam or close Steam first")
+        if sys.platform.startswith("linux"):
+            from . import apply_helper
+            return apply_helper.schedule(paths)
         run(["steam", "-shutdown"], 10)
         deadline = time.monotonic() + 10
         while running() and time.monotonic() < deadline:

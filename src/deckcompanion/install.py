@@ -7,7 +7,7 @@ import tempfile
 from . import __version__, content, localfix, net, steam, update
 from .common import Error, atomic, component, read_json, save_state, state, write_json
 
-PAYLOAD = ("src", "vdf", "recipes", "compat", "docs", "bin", "LICENSE", "THIRD_PARTY_NOTICES.md",
+PAYLOAD = ("src", "vdf", "recipes", "compat", "docs", "bin", "assets/logo", "LICENSE", "THIRD_PARTY_NOTICES.md",
            "compatibilitytool.vdf", "toolmanifest.vdf", "install.sh", "uninstall.sh", "DeckCompanion-Installer.desktop")
 
 
@@ -27,7 +27,6 @@ def files(source):
 def install(paths, source):
     if hasattr(os, "geteuid") and os.geteuid() == 0:
         raise Error("no_root", "Run the installer as your normal user, without sudo")
-    steam.require_closed()
     source = Path(source).resolve()
     version = component(__version__)
     inputs = files(source)
@@ -55,7 +54,6 @@ def install(paths, source):
     receipt_path = paths.data / "installation.json"
     receipt = read_json(receipt_path, {"files": {}})
     def owned_write(path, data, mode=0o644):
-        steam.require_closed()
         payload = data.encode() if isinstance(data, str) else data
         if path.exists() and path.read_bytes() != payload and receipt["files"].get(str(path)) != net.digest(path):
             raise Error("install_conflict", f"Preserving existing file: {path}")
@@ -80,7 +78,10 @@ def install(paths, source):
         data = state(paths)
         data["shortcut_pending"] = True
         save_state(paths, data)
-    return {"installed": True, "version": version, "shortcut_pending": has_ui,
+    data = state(paths)
+    pending = bool(data.get("shortcut_pending") or any(g.get("pending") for g in data["games"].values()))
+    return {"installed": True, "version": version, "shortcut_pending": bool(data.get("shortcut_pending")),
+            "steam_changes_pending": pending,
             "restart_required": True, "legacy_tool_preserved": legacy}
 
 
