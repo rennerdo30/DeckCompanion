@@ -277,6 +277,7 @@ def differs(path, payload):
 
 def has_pending(data):
     return bool(data.get("default_pending") or data.get("shortcut_pending") or
+                any(g.get("pending") for g in data.get("non_steam", {}).values()) or
                 any(g.get("pending") for g in data["games"].values()))
 
 
@@ -402,6 +403,17 @@ def prepare_apply(paths):
         writes.extend(shortcut_artwork(paths, path))
         data["shortcut_pending"] = False
         changes.append({"action": "shortcut"})
+    pending_games = [g for g in data.get("non_steam", {}).values() if g.get("pending")]
+    if pending_games:
+        from .nonsteam import shortcut_bytes as game_shortcut_bytes
+        path = shortcut_path(paths)
+        payload = next((b for p, b in writes if p == path),
+                       path.read_bytes() if path.exists() else vdf.binary_dumps({"shortcuts": {}}))
+        for game in pending_games:
+            payload = game_shortcut_bytes(paths, payload, game)
+            changes.append({"slug": game["slug"], "action": game["pending"]})
+            game["pending"] = None
+        writes = [(p, b) for p, b in writes if p != path] + [(path, payload)]
     writes = [(p, payload) for p, payload in writes if differs(p, payload)]
     originals = {p: p.read_bytes() if p.exists() else None for p, _ in writes}
     originals.update({p: p.read_bytes() for p in cleanup if p.exists()})

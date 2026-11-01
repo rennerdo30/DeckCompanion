@@ -6,6 +6,9 @@ const ArtCache = preload("res://scripts/art_cache.gd")
 const GameArt = preload("res://scripts/game_art.gd")
 const Text = preload("res://scripts/game_text.gd")
 const DragScroll = preload("res://scripts/drag_scroll.gd")
+const AddGame = preload("res://scripts/add_game.gd")
+var add_flow: RefCounted
+var remove_dialog: ConfirmationDialog
 const UI_VERSION := "0.3.4"
 const INK := Color("e7f1f4")
 const MUTED := Color("9ab0bc")
@@ -207,6 +210,13 @@ func _build_shell() -> void:
 	licenses.confirmed.connect(_restore_modal_focus)
 	licenses.canceled.connect(_restore_modal_focus)
 	add_child(licenses)
+	remove_dialog = ConfirmationDialog.new()
+	remove_dialog.title = "Remove this game?"
+	remove_dialog.dialog_text = "Removes only the Steam shortcut and library entry after Apply.\nYour game files and save prefix are kept."
+	remove_dialog.ok_button_text = "Remove game"
+	remove_dialog.confirmed.connect(func(): _request("remove-game",[selected.slug]))
+	remove_dialog.canceled.connect(_restore_modal_focus)
+	add_child(remove_dialog)
 
 func _restore_modal_focus() -> void:
 	if is_instance_valid(modal_focus) and modal_focus.is_visible_in_tree(): modal_focus.grab_focus()
@@ -233,6 +243,14 @@ func _completed(command: String, data: Dictionary) -> void:
 	else:
 		error = ""
 		match command:
+			"add-game", "remove-game":
+				add_flow = null
+				detail = false
+				filter = 0
+				last_focus = data.get("appid","add-game")
+				notice = "Game added. Apply to add its Steam shortcut." if command == "add-game" else "Game removed. Apply to remove its Steam shortcut. Saves kept."
+				_refresh()
+				return
 			"games":
 				games = data.games
 				preview_notes.clear()
@@ -301,6 +319,7 @@ func _render() -> void:
 	elif not notice.is_empty(): body.add_child(_label(notice,18,MINT))
 	if tab == 2: _settings_screen()
 	elif tab == 1: _updates_screen()
+	elif add_flow != null: add_flow.render()
 	elif detail and not selected.is_empty(): _detail_screen()
 	else: _games_screen()
 	var count: int = status.get("pending",[]).size()
@@ -323,9 +342,10 @@ func _restore_focus() -> void:
 
 func _games_screen() -> void:
 	var filters := _row(body)
+	_button("＋  Add a game",func(): notice = ""; error = ""; add_flow = AddGame.new(self); _render(),filters,"add-game")
 	for i in 3:
 		_button((["All games","Has fix","Enabled"][i]) + ("  ✓" if filter == i else ""),_set_filter.bind(i),filters,"filter%s" % i)
-	var library := games if settings.get("show_games_without_recipe",true) else games.filter(func(game): return game.has_recipe)
+	var library := games if settings.get("show_games_without_recipe",true) else games.filter(func(game): return game.has_recipe or game.get("kind") == "non_steam")
 	var visible := Nav.visible_games(library,filter)
 	var split := _row(body)
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -346,6 +366,7 @@ func _games_screen() -> void:
 		var result := "Not launched" if launch == null else ("Last handoff OK" if launch.get("ok",false) else "Preparation failed")
 		var summary: String = "Recipe " + str(game.get("recipe_version","")) + "   ·   " + state if game.has_recipe else state
 		var text: String = game.name + "\n" + summary + "   ·   " + result
+		if game.get("kind") == "non_steam": text = game.name + "  [NON-STEAM]\n" + ("Shortcut queued  ·  " if game.get("shortcut_pending") else "") + summary
 		var button := _button(text,_open_game.bind(game),list,game.appid)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -432,7 +453,9 @@ func _detail_screen() -> void:
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(name_label)
 	var enabled: bool = selected.get("pending") == "enable" or (selected.get("pending") == null and selected.enabled)
-	_button("Disable" if enabled else "Enable DeckCompanion",_toggle_game,row,"toggle",selected.has_recipe)
+	if selected.get("kind") == "non_steam":
+		_button("Remove game",func(): modal_focus = get_viewport().gui_get_focus_owner(); remove_dialog.popup_centered(); remove_dialog.get_cancel_button().grab_focus(),row,"remove-game")
+	else: _button("Disable" if enabled else "Enable DeckCompanion",_toggle_game,row,"toggle",selected.has_recipe)
 	var scroll := DragScroll.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.follow_focus = true
@@ -647,6 +670,7 @@ func _update_status(column: Node) -> void:
 	_button("Refresh Proton builds",func(): proton_backend.request("proton"),proton,"proton_refresh",not proton_backend.busy)
 
 func _toggle_game() -> void:
+	if selected.get("kind") == "non_steam": return
 	if not detail or not selected.get("has_recipe",false) or backend.busy: return
 	var enabled: bool = selected.get("pending") == "enable" or (selected.get("pending") == null and selected.enabled)
 	_request("disable" if enabled else "enable",[selected.appid])
@@ -662,12 +686,16 @@ func _switch_tab(value: int) -> void:
 	if backend.busy: return
 	tab = value
 	detail = false
+	add_flow = null
 	last_focus = ["games","updates","settings"][value]
 	if value == 1 and not proton_backend.busy: proton_backend.request("proton")
 	_render()
 
 func _back() -> void:
 	if backend.busy: return
+	if add_flow != null:
+		add_flow.back()
+		return
 	if detail:
 		detail = false
 		last_focus = selected.get("appid","")
@@ -682,7 +710,7 @@ func _input(event: InputEvent) -> void:
 		hints.queue_redraw()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if dialog.visible or licenses.visible or backend.busy: return
+	if dialog.visible or licenses.visible or remove_dialog.visible or backend.busy: return
 	if event.is_action_pressed("ui_cancel"): _back()
 	elif event.is_action_pressed("dc_left") or event.is_action_pressed("dc_right"): _switch_tab(Nav.next_index(tab,-1 if event.is_action_pressed("dc_left") else 1,3))
 	elif event.is_action_pressed("dc_x"):
@@ -697,7 +725,7 @@ func _process(delta: float) -> void:
 	if proton_poll >= 1.0 and proton_data.get("active",false) and not proton_backend.busy:
 		proton_poll = 0.0
 		proton_backend.request("proton")
-	var scroll: ScrollContainer = license_scroll if licenses.visible else (log_view if detail else (screen_scroll if tab != 0 else preview_scroll))
+	var scroll: ScrollContainer = license_scroll if licenses.visible else (screen_scroll if add_flow != null else (log_view if detail else (screen_scroll if tab != 0 else preview_scroll)))
 	if is_instance_valid(scroll) and not dialog.visible:
 		var axis := 0.0
 		for device in Input.get_connected_joypads():

@@ -140,6 +140,7 @@ func run() -> void:
 	check(not ui.detail and ui.last_focus == "2300320","back restores game focus identity")
 	ui._switch_tab(1)
 	check(ui.tab == 1,"tab switches")
+	await nonsteam_checks(ui)
 	root.size = Vector2i(1920,1080)
 	await process_frame
 	await process_frame
@@ -150,6 +151,76 @@ func run() -> void:
 	await process_frame
 	print("RESULT: %s/%s checks passed" % [checks-failures,checks])
 	quit(0 if failures == 0 else 1)
+
+func nonsteam_capture(name: String) -> void:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--capture-add=") and DisplayServer.get_name() != "headless":
+			var directory := arg.trim_prefix("--capture-add=")
+			DirAccess.make_dir_recursive_absolute(directory)
+			await create_timer(0.2).timeout
+			await RenderingServer.frame_post_draw
+			check(root.get_texture().get_image().save_png(directory.path_join(name+".png")) == OK,"save add-game capture")
+
+func nonsteam_checks(ui: Node) -> void:
+	ui._switch_tab(0)
+	await process_frame
+	var start := control(ui,"add-game")
+	check(start != null,"Games tab offers Add a game")
+	if start == null: return
+	start.pressed.emit()
+	await process_frame
+	check(ui.add_flow.folder == "/home/deck","browser starts at Home")
+	check(control(ui,"file:Games") != null,"browser exposes controller-focusable folders")
+	control(ui,"file:Games").pressed.emit()
+	await process_frame
+	check(ui.add_flow.folder == "/home/deck/Games","folder activation navigates without FileDialog")
+	await nonsteam_capture("add-browser")
+	control(ui,"file:Orbit Trails.exe").pressed.emit()
+	await process_frame
+	check(ui.add_flow.game_name == "Orbit Trails","exe name prefills display name")
+	control(ui,"store:gog").pressed.emit()
+	control(ui,"add-keyboard").pressed.emit()
+	await process_frame
+	check(ui.add_flow.store == "gog" and control(ui,"key:A") != null,"store and built-in controller keyboard available")
+	control(ui,"key:A").pressed.emit()
+	check(ui.add_flow.name_input.text == "Orbit TrailsA","controller key edits name")
+	control(ui,"key:erase").pressed.emit()
+	check(ui.add_flow.name_input.text == "Orbit Trails","backspace edits name")
+	ui.add_flow.set_name("")
+	check(control(ui,"add-submit").disabled,"empty name disables Add")
+	ui.add_flow.type_key("A")
+	check(not control(ui,"add-submit").disabled,"controller typing re-enables Add")
+	ui.add_flow.set_name("Orbit Trails")
+	ui.add_flow.name_input.text = "Orbit Trails"
+	await nonsteam_capture("add-name")
+	control(ui,"key:erase").grab_focus()
+	await nonsteam_capture("add-keyboard")
+	control(ui,"add-submit").pressed.emit()
+	await create_timer(0.7).timeout
+	var added: Array = ui.games.filter(func(g): return g.get("kind") == "non_steam")
+	check(added.size() == 1 and ui.add_flow == null,"add completes and refreshes library")
+	if added.is_empty(): return
+	var game: Dictionary = added[0]
+	check(control(ui,game.appid).text.contains("[NON-STEAM]"),"library displays non-Steam badge")
+	check(not ui.status.pending.is_empty(),"add queues Steam apply")
+	check(not Backend.parse_response(JSON.stringify(game),0,"add-game").has("error"),"real add response contract accepted")
+	ui._open_game(game)
+	await create_timer(0.25).timeout
+	check(control(ui,"remove-game") != null and control(ui,"toggle") == null,"non-Steam detail has Remove")
+	control(ui,"remove-game").pressed.emit()
+	check(ui.remove_dialog.visible and ui.remove_dialog.get_cancel_button().has_focus(),"remove confirmation defaults to cancel")
+	ui.remove_dialog.hide()
+	ui.remove_dialog.confirmed.emit()
+	await create_timer(0.7).timeout
+	check(not ui.games.any(func(g): return g.get("kind") == "non_steam"),"remove refreshes library")
+	check(not ui.status.pending.is_empty(),"removal remains queued until Apply")
+	ui._request("apply",["--restart-steam"])
+	await create_timer(0.7).timeout
+	check(ui.status.pending.is_empty(),"apply clears non-Steam additions and removals")
+	control(ui,"add-game").pressed.emit()
+	ui._back()
+	check(ui.add_flow == null and ui.last_focus == "add-game","B cancels file browser and restores entry focus")
+	ui._switch_tab(1)
 
 func control(ui: Node, id: String) -> Control:
 	for item in ui.controls:

@@ -121,6 +121,8 @@ def test_first_install_of_running_source_version_creates_pointer(paths, monkeypa
 
 
 def test_release_api_mock_and_initial_offline(paths, monkeypatch):
+    # The runtime installer has its own download/integrity tests; isolate engine URLs.
+    monkeypatch.setattr("deckcompanion.umu.install", lambda paths: {"installed": True})
     candidate = index(paths, "0.3.0")
     monkeypatch.delenv("DECKCOMPANION_INDEX_URL", raising=False)
     urls = []

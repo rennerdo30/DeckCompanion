@@ -4,6 +4,22 @@ An offline-capable recipe engine and controller-friendly companion for Steam Dec
 Python >= 3.11, standard library only at runtime; vendored MIT `vdf` handles Steam's
 text and binary formats. Target: SteamOS 3.9. Project license: MIT, rennerdo30.
 
+## Non-Steam Windows games
+
+In **Games → Add a game**, browse Home or a mounted drive, select an `.exe`,
+keep or edit its prefilled name with the built-in controller keyboard, and choose
+Standalone, Epic Games or GOG. Apply once to add its Steam library shortcut.
+Non-Steam entries have a badge and a **Remove game** action; removal keeps the
+original game files and save prefix. Store selection supplies compatibility fixes,
+not store login, DRM bypass or a game downloader.
+
+The shortcut runs the official umu-launcher zipapp as a separate process with the
+best installed Proton (GE preferred). `update` installs the pinned runtime, or run
+`deckcompanion umu install --json`. First launch may download umu's Steam runtime.
+The GPL-3.0 runtime and its LICENSE are downloaded into the user's data directory;
+no umu code is included in DeckCompanion's MIT source or release tarball.
+See [non-Steam commands](docs/cli.md#non-steam-windows-games). **Not verified on hardware.**
+
 ## Install (Desktop Mode)
 
 Open Konsole on your Steam Deck and paste this one line:
