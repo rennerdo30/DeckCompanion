@@ -12,7 +12,7 @@ var removed_pending: Array = []
 var worker: Thread
 var active := ""
 var settings := {"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true,"auto_install_ge":true,"cleanup_old_ge":true,"splash_parallel":false,"takeover_all":true}
-var proton_builds: Array = [{"name":"GE-Proton11-11","state":"wanted","installed":false,"wanted_by":["Farming Simulator 25"],"latest":true}]
+var proton_builds: Array = [{"name":"GE-Proton11-11","state":"wanted","installed":false,"wanted_by":["Farming Simulator 25"],"latest":true},{"name":"GE-Proton11-7","state":"installed","installed":true,"installed_bytes":1717986918,"removable":true}]
 var proton_ticks := 0
 
 func _ready() -> void:
@@ -47,10 +47,11 @@ static func parse_response(raw: String, exit_code: int, command: String) -> Dict
 	var valid := true
 	match command:
 		"proton":
-			valid = data.get("active") is bool and (data.get("scheduled",false) or data.get("builds") is Array)
+			# `proton available` lists releases (source/page fields, no job state).
+			valid = (data.get("active") is bool and (data.get("scheduled",false) or data.get("builds") is Array)) or (data.has("source") and data.get("builds") is Array)
 			if valid and data.has("builds"):
 				for build in data.builds:
-					if not build is Dictionary or not build.get("name") is String or not build.get("state") is String: valid = false
+					if not build is Dictionary or not build.get("name") is String or (not data.has("source") and not build.get("state") is String): valid = false
 		"settings": valid = data.get("splash") is bool and (data.get("splash_seconds") is float or data.get("splash_seconds") is int) and data.splash_seconds >= 1 and data.splash_seconds <= 10 and data.get("show_games_without_recipe") is bool and data.get("check_updates_on_start") is bool
 		"games":
 			valid = data.get("games") is Array
@@ -140,6 +141,15 @@ func _mock_later(command: String, args: Array) -> void:
 
 func mock_response(command: String, args: Array = []) -> Dictionary:
 	if command == "proton":
+		if not args.is_empty() and args[0] == "available":
+			var releases: Array = []
+			for i in 6:
+				var name := "GE-Proton11-%d" % (11 - i)
+				releases.append({"name": name, "published_at": "2026-10-%02dT12:00:00Z" % (19 - i*3), "size": 470000000, "digest_available": true, "installed": proton_builds.any(func(b): return b.name == name and b.get("installed",false))})
+			return {"builds": releases, "source": "github", "page": 1, "per_page": 20, "has_more": true, "fetched_at": "2026-11-01T13:00:00Z", "cached": false, "stale": false, "warning": null}
+		if not args.is_empty() and args[0] == "remove":
+			proton_builds = proton_builds.filter(func(b): return b.name != args[1])
+			return {"builds": proton_builds.duplicate(true), "active": false, "job": {}, "removed": args[1], "warnings": []}
 		if not args.is_empty() and args[0] == "install":
 			proton_ticks = 1
 			return {"scheduled":true,"active":true}

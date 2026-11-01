@@ -10,6 +10,9 @@ const AddGame = preload("res://scripts/add_game.gd")
 var add_flow: RefCounted
 var remove_dialog: ConfirmationDialog
 var restore_dialog: ConfirmationDialog
+var proton_remove_dialog: ConfirmationDialog
+var pending_proton_remove := ""
+var available_data: Dictionary = {}
 const UI_VERSION := "0.4.3"
 # Design tokens (shared with the logo and Steam artwork palette).
 const INK := Color("e7f1f4")
@@ -310,6 +313,14 @@ func _build_shell() -> void:
 	restore_dialog.confirmed.connect(func(): _request("restore-all"))
 	restore_dialog.canceled.connect(_restore_modal_focus)
 	add_child(restore_dialog)
+	proton_remove_dialog = ConfirmationDialog.new()
+	proton_remove_dialog.title = "Remove Proton build?"
+	proton_remove_dialog.ok_button_text = "Remove"
+	proton_remove_dialog.cancel_button_text = "Keep it"
+	proton_remove_dialog.min_size = Vector2i(640,220)
+	proton_remove_dialog.confirmed.connect(func(): proton_backend.request("proton",["remove",pending_proton_remove,"--force"]))
+	proton_remove_dialog.canceled.connect(_restore_modal_focus)
+	add_child(proton_remove_dialog)
 	remove_dialog = ConfirmationDialog.new()
 	remove_dialog.title = "Remove this game?"
 	remove_dialog.dialog_text = "Removes only the Steam shortcut and library entry after Apply.\nYour game files and save prefix are kept."
@@ -957,6 +968,11 @@ func _update_completed(_command: String, data: Dictionary) -> void:
 	if tab != 0: _render()
 
 func _proton_completed(_command: String, data: Dictionary) -> void:
+	if not data.has("error") and data.has("source"):
+		available_data = data
+		if tab == 1: _render()
+		return
+	if not data.has("error") and data.get("removed") != null: notice = "Removed %s." % data.removed
 	if data.has("error"):
 		notice = "Proton builds: " + str(data.error.message)
 		proton_data.active = false
@@ -1021,12 +1037,33 @@ func _update_status(column: Node) -> void:
 		if not wanted_by.is_empty(): message += "  ·  Wanted by " + ", ".join(wanted_by)
 		if build.get("latest",false): message += "  ·  Newest GE"
 		if build.has("total_bytes"): message += "  ·  %.0f / %.0f MiB" % [float(build.get("downloaded_bytes",0))/1048576,float(build.total_bytes)/1048576]
-		if build.has("installed_bytes"): message += "  ·  %.0f MiB" % (float(build.installed_bytes)/1048576)
+		if build.has("installed_bytes"): message += "  ·  %.1f GB" % (float(build.installed_bytes)/1073741824.0)
 		var row := _setting_row(proton,str(build.name),message)
 		if not build.get("installed",false):
 			_chip("Install",_install_proton.bind(str(build.name)),row,"proton_"+str(build.name),false,MINT,not proton_data.get("active",false) and not proton_backend.busy)
+		elif build.get("removable",false):
+			_chip("Remove",_confirm_proton_remove.bind(str(build.name)),row,"remove_"+str(build.name),false,WARN,not proton_data.get("active",false) and not proton_backend.busy)
 	if proton_data.is_empty(): _paragraph(proton,"Reading installed and wanted builds…")
 	_chip("Refresh",func(): proton_backend.request("proton"),proton,"proton_refresh",false,MINT,not proton_backend.busy)
+	# More versions: any GE-Proton release, installed on demand (DC-27).
+	var more := _card(column,"Get more GE-Proton versions")
+	if available_data.is_empty():
+		_paragraph(more,"Browse recent GE-Proton releases and install any of them. Only builds DeckCompanion can safely remove get a Remove button.")
+		_chip("Show versions",func(): proton_backend.request("proton",["available"]),more,"proton_available",false,MINT,not proton_backend.busy)
+	else:
+		if available_data.get("stale",false) or available_data.get("warning") != null: _paragraph(more,str(available_data.get("warning","Showing the cached list")),WARN)
+		for release in available_data.get("builds",[]).slice(0,8):
+			var size_text: String = ("%.0f MB" % (float(release.get("size",0))/1000000.0)) if release.get("size") != null else ""
+			var row := _setting_row(more,str(release.name),"Released " + str(release.get("published_at","")).get_slice("T",0) + ("  ·  " + size_text if size_text != "" else "") + ("" if release.get("digest_available",true) else "  ·  no published checksum"))
+			if release.get("installed",false): _badge(row,"INSTALLED",MINT).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			else: _chip("Install",_install_proton.bind(str(release.name)),row,"get_"+str(release.name),false,MINT,not proton_data.get("active",false) and not proton_backend.busy)
+
+func _confirm_proton_remove(name: String) -> void:
+	pending_proton_remove = name
+	proton_remove_dialog.dialog_text = "Remove %s from this Deck?\nGames set to use it fall back to the automatic choice." % name
+	modal_focus = get_viewport().gui_get_focus_owner()
+	proton_remove_dialog.popup_centered()
+	proton_remove_dialog.get_cancel_button().grab_focus()
 
 func _toggle_game() -> void:
 	if selected.get("kind") == "non_steam": return
@@ -1071,7 +1108,7 @@ func _input(event: InputEvent) -> void:
 		hints.queue_redraw()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if dialog.visible or licenses.visible or remove_dialog.visible or restore_dialog.visible or backend.busy: return
+	if dialog.visible or licenses.visible or remove_dialog.visible or restore_dialog.visible or proton_remove_dialog.visible or backend.busy: return
 	if event.is_action_pressed("ui_cancel"): _back()
 	elif event.is_action_pressed("dc_left") or event.is_action_pressed("dc_right"): _switch_tab(Nav.next_index(tab,-1 if event.is_action_pressed("dc_left") else 1,3))
 	elif event.is_action_pressed("dc_x"):

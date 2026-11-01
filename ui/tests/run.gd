@@ -677,5 +677,19 @@ func ge_checks(ui: Node) -> void:
 	await create_timer(0.25).timeout
 	check(ui.proton_data.builds[0].state == "failed" and ui.proton_data.builds[0].error.contains("disk"),"poll preserves actionable failure reason")
 	check(control(ui,"proton_GE-Proton11-11") != null,"failed build offers retry")
+	# DC-27: browse any GE release, remove builds with confirmation.
+	ui.proton_backend.scenario = ""
+	ui.proton_backend.request("proton")
+	await create_timer(0.25).timeout
+	check(control(ui,"remove_GE-Proton11-7") != null,"removable installed build offers Remove")
+	control(ui,"remove_GE-Proton11-7").pressed.emit()
+	check(ui.proton_remove_dialog.visible,"Remove asks for confirmation")
+	ui.proton_remove_dialog.confirmed.emit()
+	ui.proton_remove_dialog.hide()
+	await create_timer(0.3).timeout
+	check(not ui.proton_data.builds.any(func(b): return b.name == "GE-Proton11-7") and ui.notice.contains("Removed GE-Proton11-7"),"confirmed removal updates the list")
+	control(ui,"proton_available").pressed.emit()
+	await create_timer(0.3).timeout
+	check(control(ui,"get_GE-Proton11-10") != null and not ui.available_data.is_empty(),"available GE releases can be installed")
 	ui.proton_backend.scenario = ""
 	ui._switch_tab(0)
