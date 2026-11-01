@@ -255,9 +255,14 @@ def test_install_queues_only_steam_visible_changes(game_paths, source, monkeypat
         atomic(steam.mapping_path(game_paths), vdf.dumps(doc))
     monkeypatch.setattr(install, "__version__", "0.3.3")
     result = install.install(game_paths, source)
-    assert result["steam_changes_pending"] is (mode != "engine")
-    assert result["restart_required"] is (mode != "engine")
-    assert result["shortcut_pending"] is (mode in ("shortcut", "art"))
+    # A default changed in Steam afterwards is the user's choice: updates leave it
+    # alone (owner, 2026-11-02), so "mapping" queues nothing, like a plain engine update.
+    visible = mode in ("shortcut", "art")
+    assert result["steam_changes_pending"] is visible
+    assert result["restart_required"] is visible
+    assert result["shortcut_pending"] is visible
+    if mode == "mapping":
+        assert steam.mappings(steam.read_vdf(steam.mapping_path(game_paths)))["0"]["name"] == "foreign"
     if mode == "engine":
         assert {p: p.read_bytes() for p in game_paths.steam.rglob("*") if p.is_file()} == before
         monkeypatch.setattr(steam.sys, "platform", "linux")
