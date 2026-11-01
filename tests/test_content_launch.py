@@ -144,6 +144,9 @@ def test_localfix_upstream_order_marker_and_foreign_file(paths, tmp_path, monkey
 
 
 def test_http_deadline_kills_only_owned_worker(paths, monkeypatch):
+    import importlib
+    # Get the real callable without allowing any real subprocess/network access.
+    real_fetch = importlib.reload(net).fetch
     class Process:
         pid = 98765
         returncode = None
@@ -159,7 +162,7 @@ def test_http_deadline_kills_only_owned_worker(paths, monkeypatch):
     proc = Process()
     monkeypatch.setattr(net.subprocess, "Popen", lambda *a, **k: proc)
     with pytest.raises(Error, match="timed out"):
-        net.fetch("https://example.org/file", paths.cache / "target")
+        real_fetch("https://example.org/file", paths.cache / "target")
     assert proc.killed and net.STARTED_PIDS[-1] == 98765
     assert 0 < proc.waits[0] <= 2 and proc.waits[1] == 2
     assert not (paths.cache / "target").exists()

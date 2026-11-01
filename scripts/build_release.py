@@ -68,6 +68,8 @@ def resolve(text, work, metadata):
 
 def build(output, version=__version__, offline=False):
     version = component(version)
+    if version != __version__:
+        raise Error("version_mismatch", "Bump src/deckcompanion/__init__.py before building another version")
     output.mkdir(parents=True, exist_ok=True)
     archive = output / f"deckcompanion-{version}.tar.gz"
     base = f"https://github.com/rennerdo30/DeckCompanion/releases/download/v{version}/"
@@ -81,18 +83,29 @@ def build(output, version=__version__, offline=False):
             recipes.validate(tomllib.loads(text), path.stem)
             entries[path.stem] = {"toml": text, "sha256": hashlib.sha256(text.encode()).hexdigest()}
         with tarfile.open(archive, "w:gz") as tar:
+            def include(info):
+                if "__pycache__" in info.name or info.name.endswith(".pyc"):
+                    return None
+                if info.name in ("compat/DeckCompanion", "bin/deckcompanion-ui", "install.sh", "uninstall.sh", "DeckCompanion-Installer.desktop"):
+                    info.mode = 0o755
+                return info
             for name in ("src", "vdf", "recipes", "compat", "docs", "LICENSE", "THIRD_PARTY_NOTICES.md", "compatibilitytool.vdf", "toolmanifest.vdf", "install.sh", "uninstall.sh", "DeckCompanion-Installer.desktop"):
                 source = ROOT / name
                 if source.exists():
-                    tar.add(source, arcname=name, filter=lambda info: None if "__pycache__" in info.name or info.name.endswith(".pyc") else info)
+                    tar.add(source, arcname=name, filter=include)
             # The UI child can export this release payload; never build or modify ui/ here.
             ui = ROOT / "bin/deckcompanion-ui"
             if ui.is_file():
-                tar.add(ui, arcname="bin/deckcompanion-ui")
+                tar.add(ui, arcname="bin/deckcompanion-ui", filter=include)
         sha = net.digest(archive)
         index = {"schema_version": 1, "engine": {"version": version, "url": base + archive.name, "sha256": sha}, "recipes": entries}
         write_json(output / "index.json", index)
-        atomic(output / "checksums.sha256", f"{sha}  {archive.name}\n{net.digest(output / 'index.json')}  index.json\n")
+        assets = [archive, output / "index.json"]
+        for name in ("install.sh", "DeckCompanion-Installer.desktop"):
+            if (ROOT / name).is_file():
+                atomic(output / name, (ROOT / name).read_bytes())
+                assets.append(output / name)
+        atomic(output / "checksums.sha256", "".join(f"{net.digest(p)}  {p.name}\n" for p in assets))
     return {"archive": str(archive), "sha256": sha, "index": str(output / "index.json"), "offline": offline}
 
 

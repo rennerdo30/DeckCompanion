@@ -91,6 +91,7 @@ def test_apply_restart_and_transaction_rollback(paths, monkeypatch):
     monkeypatch.setattr(steam, "running", lambda: False)
     calls = []
     monkeypatch.setattr(steam, "run", lambda cmd, timeout: calls.append(cmd))
+    monkeypatch.setattr(steam, "start", lambda: calls.append(["steam", "-silent"]))
     save_state(paths, {"games": {"42": {"pending": "enable"}}, "shortcut_pending": True})
     real_write = steam.guarded_write
     def fail_second(path, payload):

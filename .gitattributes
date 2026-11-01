@@ -1,0 +1,3 @@
+*.sh text eol=lf
+*.desktop text eol=lf
+DeckCompanion text eol=lf

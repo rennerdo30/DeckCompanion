@@ -83,7 +83,7 @@ def reconcile(paths, appid, recipe, prefix, game, preferences, budget, log):
                         atomic(path, payload)
                 raise
         except (Error, OSError, ValueError, zipfile.BadZipFile) as exc:
-            log(f"Mod {ident}: {exc}")
+            log(f"Mod {ident} ({mod['target'] if mod else previous.get('target', 'manifest files')}): {exc}")
             if previous:
                 installed[ident] = previous["version"]
     return installed
@@ -126,4 +126,4 @@ def settings(recipe, prefix, game, log):
             atomic(target, payload)
             atomic(stamp, "applied\n")
         except (Error, OSError, ValueError, configparser.Error, ET.ParseError) as exc:
-            log(f"Setting {item['id']}: {exc}")
+            log(f"Setting {item['id']} ({item['target']}): {exc}")

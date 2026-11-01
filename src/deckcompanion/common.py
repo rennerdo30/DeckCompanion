@@ -39,7 +39,7 @@ def inside(root, relative):
         raise Error("unsafe_path", "Path must stay inside its declared root")
     target = (root / relative).resolve()
     if not target.is_relative_to(root.resolve()):
-        raise Error("unsafe_path", "Path escapes its declared root")
+        raise Error("unsafe_path", f"Rejected path {relative!r}: resolves to {target}, which escapes declared root {root.resolve()}; symlink redirects outside the root are not allowed")
     return target
 
 

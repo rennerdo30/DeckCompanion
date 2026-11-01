@@ -49,7 +49,10 @@ def prepare(paths, verb, command, env=None):
         raise Error("invalid_arguments", "launch requires a Proton verb and command")
     log_path = paths.data / "logs" / f"{ident}-last.log"
     atomic(log_path, f"{now()} Preparing {ident}\n")
+    warnings = []
     def log(message):
+        if message.startswith(("Mod ", "Setting ", "Optional content skipped:")):
+            warnings.append(message)
         with log_path.open("a", encoding="utf-8") as output:
             output.write(f"{now()} {message}\n")
     with locked(paths):
@@ -89,6 +92,7 @@ def prepare(paths, verb, command, env=None):
         env.setdefault("STEAM_COMPAT_CLIENT_INSTALL_PATH", str(paths.steam))
         # ok is preparation/handoff status, not a claim the game ran successfully.
         saved["last_launch"] = {"time": now(), "ok": True}
+        saved["content_warnings"] = warnings
         save_state(paths, data)
         log(f"Handing off to {proton.name}; game result not observed")
     return args, env

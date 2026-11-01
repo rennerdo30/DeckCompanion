@@ -1,7 +1,0 @@
-{
-    "proton-version": "Proton - Experimental",
-    "env" : 
-        {
-            "ENV_NAME" : "ENV_VALUE"
-        }
-}

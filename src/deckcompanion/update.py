@@ -80,7 +80,8 @@ def install_engine(paths, source, version, sha256):
         for name in ("src/deckcompanion/__main__.py", "vdf/__init__.py", "compat/DeckCompanion"):
             if not (staging / name).is_file():
                 raise Error("invalid_engine", f"Release lacks {name}")
-        write_json(staging / ".release.json", {"version": version, "sha256": sha256})
+        hashes = {p.relative_to(staging).as_posix(): net.digest(p) for p in staging.rglob("*") if p.is_file() and not p.is_symlink()}
+        write_json(staging / ".release.json", {"version": version, "sha256": sha256, "files": hashes})
         os.replace(staging, target)
         switch(paths, version)
     finally:

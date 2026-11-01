@@ -163,5 +163,6 @@ def test_release_build_resolves_latest_with_mock_api(tmp_path, monkeypatch):
     with tarfile.open(result["archive"]) as tar:
         names = tar.getnames()
         assert "src/deckcompanion/__main__.py" in names and "vdf/LICENSE" in names
+        assert tar.getmember("compat/DeckCompanion").mode & 0o111
         assert not any("__pycache__" in n or n.startswith("ui/") for n in names)
     assert (tmp_path / "release/checksums.sha256").read_text().startswith(result["sha256"])

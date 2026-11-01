@@ -71,6 +71,9 @@ before our additions. Wine installs/registry steps use `@util.once(retry=True)`;
 environment and DLL overrides apply each invocation. Foreign localfixes are
 preserved. Prefix content is deferred until a subsequent launch when `pfx` exists.
 Symlinked Documents directories outside the prefix are refused and logged.
+Content warnings also appear in `game APPID --json`'s `notes`, including the mod,
+requested path, resolved destination and containment reason. `log_tail` retains
+the same message; game listing shapes remain unchanged.
 
 ## Update and rollback (slice 3a)
 
@@ -80,5 +83,15 @@ Offline operation uses the cache. A cached release can still install offline.
 `rollback --json` -> `{"version":"0.1.0","rolled_back":true}`; no previous version
 is an error. See [updates.md](updates.md) for integrity, cache and signing limits.
 
-Upcoming stacked slice adds `install`, `uninstall`.
+## Installer commands (slice 3)
+
+`install [--source EXTRACTED_RELEASE] --json` ->
+`{"installed":true,"version":"0.2.0","shortcut_pending":true,"restart_required":true,"legacy_tool_preserved":false}`.
+It requires Steam closed, installs no packages and changes no persistent environment.
+The source defaults to the current engine/checkout root. UI shortcut is queued
+only if the release contains `bin/deckcompanion-ui`. `apply` chooses the Steam user.
+
+`uninstall --json` -> `{"uninstalled":true,"preserved":[],"steam_restart_required":true}`.
+It requires Steam closed, restores prior mappings, and preserves user changes and
+state/cache/backups. `preserved` lists modified files. See the README for migration.
 No command or integration has been verified on hardware.

@@ -3,6 +3,15 @@ import pytest
 from deckcompanion.common import Paths
 
 
+@pytest.fixture(autouse=True)
+def no_real_network(monkeypatch):
+    from deckcompanion import net
+    def deny(*args, **kwargs):
+        raise AssertionError("Tests must mock network access")
+    monkeypatch.setattr(net, "fetch", deny)
+    # A test of the worker supervisor restores only this callable and mocks Popen.
+
+
 @pytest.fixture
 def paths(tmp_path, monkeypatch):
     roots = {"DECKCOMPANION_HOME": tmp_path / "data", "DECKCOMPANION_CACHE": tmp_path / "cache",

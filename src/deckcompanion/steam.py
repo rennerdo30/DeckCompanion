@@ -49,6 +49,22 @@ def require_closed():
         raise Error("steam_running", "Close Steam before writing its files")
 
 
+def start():
+    proc = subprocess.Popen(["steam", "-silent"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    STARTED_PIDS.append(proc.pid)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if running():
+            return  # Steam is intentionally long-lived after its bounded startup.
+        if proc.poll() not in (None, 0):
+            raise Error("steam_start_failed", "Steam exited during startup")
+        time.sleep(0.1)
+    if proc.poll() is None:
+        proc.kill()  # Our recorded launcher only; never a detected Steam PID.
+        proc.wait(timeout=2)
+    raise Error("process_timeout", "Steam did not start within 10 seconds")
+
+
 def read_vdf(path):
     return vdf.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
@@ -195,5 +211,5 @@ def apply(paths, restart=False):
                 atomic(path, originals[path])
         raise
     if restart:
-        run(["steam", "-silent"], 10)
+        start()
     return {"applied": changes, "steam_restarted": bool(restart)}

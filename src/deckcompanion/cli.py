@@ -48,12 +48,21 @@ def parser():
     launch.add_argument("--json", action="store_true")
     launch.add_argument("verb")
     launch.add_argument("cmd", nargs=argparse.REMAINDER)
+    for name in ("install", "uninstall"):
+        sub = commands.add_parser(name)
+        sub.add_argument("--json", action="store_true")
+        if name == "install":
+            from pathlib import Path
+            sub.add_argument("--source", type=Path, default=Path(__file__).resolve().parents[2])
     return root
 
 
 def execute(args, paths):
     name = args.command
     data = state(paths)
+    if name in ("install", "uninstall"):
+        from . import install
+        return install.install(paths, args.source) if name == "install" else install.uninstall(paths)
     if name in ("update", "rollback"):
         from . import update
         return getattr(update, name)(paths)
@@ -63,6 +72,9 @@ def execute(args, paths):
     if name == "game":
         result = game(paths, args.appid)
         result["notes"] = (recipes.load(paths, args.appid) or {}).get("notes", "")
+        warnings = data["games"].get(args.appid, {}).get("content_warnings", [])
+        if warnings:
+            result["notes"] += "\n" + "\n".join(warnings)
         path = paths.data / "logs" / f"{args.appid}-last.log"
         if path.exists():
             with path.open(encoding="utf-8", errors="replace") as log:
