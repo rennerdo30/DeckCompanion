@@ -23,15 +23,15 @@ var launchers_data: Array = []
 var launcher_poll := 0.0
 const UI_VERSION := "0.4.5"
 # Design tokens (shared with the logo and Steam artwork palette).
-const INK := Color("e7f1f4")
-const MUTED := Color("8fa6b2")
-const MINT := Color("b8f18b")
-const CREAM := Color("e9d9a0")
-const WARN := Color("ffbd9d")
-const SURFACE := Color("101c25")
-const SURFACE_2 := Color("16262f")
-const SURFACE_3 := Color("1d3240")
-const LINE := Color("24404c")
+var INK: Color = Color("e7f1f4")
+var MUTED: Color = Color("8fa6b2")
+var MINT: Color = Color("b8f18b")
+var CREAM: Color = Color("e9d9a0")
+var WARN: Color = Color("ffbd9d")
+var SURFACE: Color = Color("101c25")
+var SURFACE_2: Color = Color("16262f")
+var SURFACE_3: Color = Color("1d3240")
+var LINE: Color = Color("24404c")
 const FILTERS := ["All", "Has fix", "Enabled", "Non-Steam", "Attention"]
 var sort_by_name := false
 var status_chip: Button
@@ -138,6 +138,60 @@ static func _joy_button(button: JoyButton) -> InputEventJoypadButton:
 	joy.button_index = button
 	return joy
 
+# --- Theme (DC-41) -------------------------------------------------------------
+const ACCENTS := {"mint": ["Mint", "b8f18b"], "ocean": ["Ocean", "8fd3ff"], "sunset": ["Sunset", "ffb27a"], "lavender": ["Lavender", "c9b6ff"]}
+const BACKGROUNDS := {"default": ["Default", "101c25", "16262f", "1d3240", "24404c", Color(0.035, 0.055, 0.078)], "darker": ["Darker", "0a1117", "10191f", "16232c", "1d3039", Color(0.012, 0.02, 0.03)]}
+var accent_name := "mint"
+var background_name := "default"
+var text_scale := 1.0
+
+func _px(size_px: int) -> int:
+	return int(round(size_px * text_scale))
+
+func _apply_theme_settings() -> void:
+	MINT = Color(ACCENTS.get(accent_name, ACCENTS.mint)[1])
+	var bg: Array = BACKGROUNDS.get(background_name, BACKGROUNDS["default"])
+	SURFACE = Color(bg[1])
+	SURFACE_2 = Color(bg[2])
+	SURFACE_3 = Color(bg[3])
+	LINE = Color(bg[4])
+	RenderingServer.set_default_clear_color(bg[5])
+	_make_theme()
+
+func _set_theme(key: String, value: Variant) -> void:
+	match key:
+		"accent": accent_name = value
+		"background": background_name = value
+		"text": text_scale = value
+	ui_config.set_value("theme","accent",accent_name)
+	ui_config.set_value("theme","background",background_name)
+	ui_config.set_value("theme","text_scale",text_scale)
+	ui_config.save("user://ui.cfg")
+	last_focus = "theme_%s_%s" % [key, str(value)]
+	_apply_theme_settings()
+	_render()
+
+func _appearance_card(column: Node) -> void:
+	var card := _card(column,"Appearance")
+	var accent_row := _setting_row(card,"Accent colour","Used for focus, toggles and highlights.")
+	var accents := _row(accent_row)
+	accents.add_theme_constant_override("separation",6)
+	accents.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	for key in ACCENTS:
+		_chip(ACCENTS[key][0],_set_theme.bind("accent",key),accents,"theme_accent_" + key,accent_name == key,Color(ACCENTS[key][1]))
+	var bg_row := _setting_row(card,"Background","Darker suits OLED screens and night play.")
+	var bgs := _row(bg_row)
+	bgs.add_theme_constant_override("separation",6)
+	bgs.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	for key in BACKGROUNDS:
+		_chip(BACKGROUNDS[key][0],_set_theme.bind("background",key),bgs,"theme_background_" + key,background_name == key)
+	var text_row := _setting_row(card,"Text size","Large makes every label bigger.")
+	var sizes := _row(text_row)
+	sizes.add_theme_constant_override("separation",6)
+	sizes.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	for spec in [["Normal", 1.0], ["Large", 1.15]]:
+		_chip(spec[0],_set_theme.bind("text",spec[1]),sizes,"theme_text_" + str(spec[1]),is_equal_approx(text_scale,spec[1]))
+
 func _style(bg: Color, border: Color = Color.TRANSPARENT, radius := 10, pad_x := 14, pad_y := 8) -> StyleBoxFlat:
 	var box := StyleBoxFlat.new()
 	box.bg_color = bg
@@ -152,7 +206,7 @@ func _style(bg: Color, border: Color = Color.TRANSPARENT, radius := 10, pad_x :=
 
 func _make_theme() -> void:
 	theme = Theme.new()
-	theme.default_font_size = 19
+	theme.default_font_size = _px(19)
 	theme.set_color("font_color","Label",INK)
 	for state in ["normal","hover","pressed","disabled"]:
 		theme.set_stylebox(state,"Button",_style(SURFACE_3 if state != "hover" else Color("27434f")))
@@ -163,10 +217,11 @@ func _make_theme() -> void:
 	theme.set_constant("separation","HBoxContainer",10)
 	theme.set_color("font_color","CheckButton",INK)
 
-func _label(text: String, size_px := 19, color := INK) -> Label:
+func _label(text: String, size_px := 19, color: Variant = null) -> Label:
+	if color == null: color = INK
 	var label := Label.new()
 	label.text = text
-	label.add_theme_font_size_override("font_size",size_px)
+	label.add_theme_font_size_override("font_size",_px(size_px))
 	label.add_theme_color_override("font_color",color)
 	return label
 
@@ -183,7 +238,8 @@ func _button(text: String, action: Callable, parent: Node, id: String, enabled :
 	return button
 
 ## Compact pill used for tabs, filters and the status chip.
-func _chip(text: String, action: Callable, parent: Node, id: String, active := false, accent := MINT, enabled := true) -> Button:
+func _chip(text: String, action: Callable, parent: Node, id: String, active := false, accent: Variant = null, enabled := true) -> Button:
+	if accent == null: accent = MINT
 	var button := _button(text,action,parent,id,enabled)
 	button.custom_minimum_size.y = 40
 	button.add_theme_font_size_override("font_size",17)
@@ -196,7 +252,8 @@ func _chip(text: String, action: Callable, parent: Node, id: String, active := f
 	return button
 
 ## Small read-only pill (status badges).
-func _badge(parent: Node, text: String, color := MINT) -> Label:
+func _badge(parent: Node, text: String, color: Variant = null) -> Label:
+	if color == null: color = MINT
 	var label := _label(text,15,color)
 	var box := _style(Color(color.r,color.g,color.b,0.14),Color(0,0,0,0),10,9,2)
 	label.add_theme_stylebox_override("normal",box)
@@ -218,7 +275,8 @@ func _card(parent: Node, title := "") -> VBoxContainer:
 	if not title.is_empty(): column.add_child(_label(title.to_upper(),15,MINT))
 	return column
 
-func _paragraph(parent: Node, text: String, color := MUTED, size_px := 17) -> Label:
+func _paragraph(parent: Node, text: String, color: Variant = null, size_px := 17) -> Label:
+	if color == null: color = MUTED
 	var label := _label(text,size_px,color)
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	parent.add_child(label)
@@ -234,6 +292,10 @@ static func _ago(unix: Variant) -> String:
 
 func _build_shell() -> void:
 	if ui_config.load("user://ui.cfg") == OK:
+		accent_name = str(ui_config.get_value("theme","accent","mint"))
+		background_name = str(ui_config.get_value("theme","background","default"))
+		text_scale = clampf(float(ui_config.get_value("theme","text_scale",1.0)),1.0,1.3)
+		_apply_theme_settings()
 		filter = clampi(int(ui_config.get_value("library","filter",0)),0,FILTERS.size()-1)
 		sort_by_name = bool(ui_config.get_value("library","sort_by_name",false))
 	var margin := MarginContainer.new()
@@ -674,6 +736,7 @@ func _game_row(list: Node, game: Dictionary) -> Button:
 	var thumb := GameArt.new()
 	thumb.cache = art_cache
 	thumb.custom_minimum_size = Vector2(128,60)
+	thumb.urgent = false
 	inner.add_child(thumb)
 	thumb.show_game(game)
 	var text := VBoxContainer.new()
@@ -977,6 +1040,7 @@ func _settings_screen() -> void:
 	elif pending_actions.has("default_off"): is_default = false
 	var defaults := _setting_row(general,"Default for new games","Steam's default tool for games installed later. Apply restarts Steam.")
 	_state_switch(defaults,"default",is_default,func(): _request("default",["--off" if is_default else "--on"]))
+	_appearance_card(columns[0])
 	var library := _card(columns[0],"Library")
 	_setting_toggle(library,"show_games_without_recipe","Show games without a recipe","Keep every installed game in the library.")
 	var updates := _card(columns[1],"Updates")

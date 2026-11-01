@@ -392,6 +392,19 @@ func settings_checks(ui: Node) -> void:
 	await create_timer(0.6).timeout
 	check(ui.notice.contains("plugin installed") and control(ui,"plugin_install") == null,"plugin installs independently and the button disappears when current")
 	ui._switch_tab(1)
+	# DC-41: theme settings apply live, persist, and never shrink text.
+	ui._switch_tab(2)
+	await process_frame
+	control(ui,"theme_accent_ocean").pressed.emit()
+	await process_frame
+	check(ui.MINT == Color("8fd3ff") and ui.ui_config.get_value("theme","accent") == "ocean","accent preset applies live and is saved")
+	control(ui,"theme_text_1.15").pressed.emit()
+	await process_frame
+	check(ui._px(15) >= 17 and ui.theme.default_font_size > 19,"large text scales every label up")
+	ui._set_theme("accent","mint")
+	ui._set_theme("text",1.0)
+	ui._set_theme("background","default")
+	ui._switch_tab(1)
 	check(control(ui,"default") == null and control(ui,"splash_toggle") == null,"Updates keeps status and its own update check, no settings toggles")
 	var other: Node = load("res://main.tscn").instantiate()
 	root.add_child(other)
@@ -571,7 +584,15 @@ func ui_032(ui: Node) -> void:
 			var candidates: Array[String] = ["res://missing-%s.png" % i]
 			ui.art_cache.request(candidates)
 			while ui.art_cache.worker: await process_frame
-		check(ui.art_cache.textures.size() <= 8,"art cache stays bounded including failed paths")
+		check(ui.art_cache.textures.size() <= ui.art_cache.LIMIT,"art cache stays bounded including failed paths")
+		# DC-40: every library row loads its thumbnail without being selected first.
+		ui._render()
+		for i in 300:
+			await process_frame
+			if not ui.art_cache.worker and ui.art_cache.queue.is_empty(): break
+		var thumbs: Array = ui.body.find_children("*","Control",true,false).filter(func(n): return n.get_script() == load("res://scripts/game_art.gd") and not n.urgent)
+		var with_art: int = ui.games.filter(func(g): return g.get("installed",false) and not ui.ArtCache.paths(g).is_empty()).size()
+		check(thumbs.size() >= with_art and thumbs.filter(func(t): return not t.fallback).size() >= with_art,"all library thumbnails load without selecting a game")
 		var without_notes: Dictionary = ui.games[0].duplicate(true)
 		without_notes.erase("notes")
 		var saved_notes: Array = ui.games.duplicate(true)

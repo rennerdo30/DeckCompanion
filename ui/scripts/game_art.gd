@@ -6,6 +6,8 @@ var key := ""
 var game_id := ""
 var texture: TextureRect
 var fallback := true
+## Thumbnails queue behind the focused game; previews and banners load first.
+var urgent := true
 
 func _ready() -> void:
 	clip_contents = true
@@ -21,7 +23,7 @@ func _ready() -> void:
 
 func show_game(game: Dictionary) -> void:
 	game_id = str(game.get("appid", ""))
-	key = cache.request(Cache.paths(game))
+	key = cache.request(Cache.paths(game), urgent)
 	texture.texture = cache.textures.get(key)
 	fallback = texture.texture == null
 	queue_redraw()
