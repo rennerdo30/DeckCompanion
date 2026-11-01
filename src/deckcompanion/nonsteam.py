@@ -25,27 +25,39 @@ def identity(paths, saved):
     return exe, unsigned
 
 
-def add(paths, exe, name, store="none", umu_id=None):
+def add(paths, exe, name, store="none", umu_id=None, *, launcher=None):
     exe = Path(exe).expanduser().resolve()
     name = name.strip()
     if not exe.is_file() or exe.suffix.lower() != ".exe":
         raise Error("invalid_exe", "Choose an existing Windows .exe file")
     if not name or len(name) > 128 or any(ord(c) < 32 for c in name):
         raise Error("invalid_name", "Enter a game name of 1 to 128 characters")
-    if store not in ("egs", "gog", "none"):
-        raise Error("invalid_store", "Store must be egs, gog or none")
+    if launcher is None and store not in ("egs", "gog", "none"):
+        raise Error("invalid_store", "Unknown store")
     data = state(paths)
     registry = data.setdefault("non_steam", {})
     if any(g["exe"] == str(exe) and not g.get("removed") for g in registry.values()):
         raise Error("already_registered", "This executable is already registered")
     ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
     slug = re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")[:65] or "game"
+    previous = {}
+    if launcher is not None:
+        from .launchers import preset
+        preset(paths, launcher)
+        slug = "launcher-" + launcher
+        previous = registry.get(slug, {})
+        if previous and (not previous.get("removed") or previous.get("launcher") != launcher):
+            raise Error("game_conflict", "Launcher registration already exists")
+        registry.pop(slug, None)  # Reuse the same shortcut identity after removal.
     if slug in registry:
         slug += "-" + hashlib.sha256(str(exe).encode()).hexdigest()[:12]
     if slug in registry:
         raise Error("game_conflict", "Preserving previous registration and prefix; choose another name")
-    saved = {"slug": slug, "name": name, "exe": str(exe), "store": store,
+    saved = {**previous, "slug": slug, "name": name, "exe": str(exe), "store": store,
              "umu_id": umu.lookup(paths, name, store, umu_id), "pending": "add"}
+    saved.pop("removed", None)
+    if launcher is not None:
+        saved["launcher"] = launcher
     saved["appid"] = str(identity(paths, saved)[1])
     if saved["appid"] in steam.installed(paths) or any(g["appid"] == saved["appid"] for g in registry.values()):
         raise Error("shortcut_conflict", "Shortcut identifier collision; choose another name")
@@ -67,10 +79,47 @@ def roots(paths, saved):
     return inside(paths.data, f"prefixes/{saved['slug']}"), Path(saved["exe"]).parent
 
 
-def game(paths, saved):
+def selection(paths, saved, recipe=None, log=lambda message: None):
     from .launch import select_proton
+    # A nonempty fallback recipe retains umu's existing GE-preferred automatic rule.
+    return select_proton(steam.proton(paths, log),
+                         {"runtime": {}} if saved.get("proton_override") else recipe or {"runtime": {}},
+                         saved.get("proton_override"), log=log)
+
+
+def artwork(paths, saved):
+    art = steam.artwork(paths, saved["appid"])
+    if saved.get("launcher"):
+        ident = saved["launcher"]
+        for key in art:
+            source = inside(paths.data, f"assets/launchers/{ident}/{key}.png")
+            if source.is_file():
+                art[key] = str(source)
+    return art
+
+
+def shortcut_artwork(paths, target, saved):
+    if saved.get("removed") or not saved.get("launcher"):
+        return []
+    art = artwork(paths, saved)
+    suffixes = {"portrait": "p", "hero": "_hero", "header": "", "logo": "_logo"}
+    return [(target.parent / "grid" / (saved["appid"] + suffix + ".png"), Path(art[key]).read_bytes())
+            for key, suffix in suffixes.items() if art[key] and art[key].endswith(".png")]
+
+
+def runtime(paths, saved, budget, log=lambda message: None, recipe=None):
+    selected, reason = selection(paths, saved, recipe, log)
+    if not selected:
+        raise Error("no_proton", "Install GE-Proton or Valve Proton before using umu")
+    runner = umu.install(paths, budget)["path"]
+    prefix, _ = roots(paths, saved)
+    return runner, {"WINEPREFIX": str(inside(prefix, "pfx")), "GAMEID": saved["umu_id"],
+                    "STORE": saved["store"], "PROTONPATH": str(Path(selected["path"]))}, reason
+
+
+def game(paths, saved):
     recipe = recipes.load(paths, saved["umu_id"]) or {}
-    proton, reason = select_proton(steam.proton(paths), recipe or {"runtime": {}})
+    proton, reason = selection(paths, saved, recipe)
     prefix, folder = roots(paths, saved)
     manifest = read_json(paths.data / "manifests" / f"{saved['appid']}.json", {"mods": {}})
     mods = []
@@ -83,8 +132,9 @@ def game(paths, saved):
     return {**saved, "kind": "non_steam", "installed": True, "has_recipe": bool(recipe),
             "enabled": True, "pending": None, "shortcut_pending": saved.get("pending"),
             "recipe_version": recipe.get("version"), "mods": mods, "last_launch": saved.get("last_launch"),
-            "notes": recipe.get("notes", ""), "art": steam.artwork(paths, saved["appid"]),
+            "notes": recipe.get("notes", ""), "art": artwork(paths, saved),
             "takeover": "n/a", "previous_mapping": None, "valve_recommendation": None,
+            "options": {"proton": True, "takeover": False},
             "proton": dict(proton, reason=reason) if proton else None}
 
 
@@ -105,13 +155,16 @@ def shortcut_bytes(paths, payload, saved):
         desired = dict(previous or {"tags": {}}, appid=ident, AppName=saved["name"], Exe=exe,
                        StartDir='"' + str(Path(saved["exe"]).parent) + '"', LaunchOptions=options,
                        icon=str(paths.data / "assets/icon.png"), IsHidden=0, AllowDesktopConfig=1, AllowOverlay=1)
+        if saved.get("launcher"):
+            icon = inside(paths.data, f"assets/launchers/{saved['launcher']}/icon.png")
+            if icon.is_file():
+                desired["icon"] = str(icon)
         entries = [desired if owned(e) else e for e in entries] if previous else [*entries, desired]
     doc["shortcuts"] = {str(i): e for i, e in enumerate(entries)}
     return vdf.binary_dumps(doc)
 
 
 def run(paths, slug, env=None):
-    from .launch import resolve_proton
     saved = entry(paths, slug)
     env = dict(os.environ if env is None else env)
     ident = saved["appid"]
@@ -128,14 +181,10 @@ def run(paths, slug, env=None):
     except Exception as exc:
         warnings.append(str(exc))
         log(f"Recipe skipped: {exc}; continuing without optional fixes")
-    try:
-        proton = resolve_proton(paths, recipe or {"runtime": {}}, budget, log)
-    except Exception as exc:
-        log(f"Proton unavailable: {exc}")
-        raise
     # Required runtime failure is actionable; optional preparation always fails open.
     try:
-        runner = umu.install(paths, budget)["path"]
+        runner, runtime_env, reason = runtime(paths, saved, budget, log, recipe)
+        proton = Path(runtime_env["PROTONPATH"])
     except Exception as exc:
         log(f"umu unavailable: {exc}; run deckcompanion umu install")
         raise
@@ -155,10 +204,10 @@ def run(paths, slug, env=None):
     except Exception as exc:
         warnings.append(str(exc))
         log(f"Optional preparation skipped: {exc}; continuing launch")
-    env.update(WINEPREFIX=str(inside(prefix, "pfx")), GAMEID=saved["umu_id"], STORE=saved["store"], PROTONPATH=str(proton))
+    env.update(runtime_env)
     try:
         summary = game(paths, entry(paths, slug))
-        summary["proton"] = {"name": proton.name, "reason": "pinned" if recipe.get("runtime", {}).get("proton") == proton.name else "recipe_fallback"}
+        summary["proton"] = {"name": proton.name, "reason": reason}
         splash.show(paths, {**summary, "warnings": warnings}, env)
     except Exception as exc:
         log(f"Splash skipped: {exc}; continuing launch")

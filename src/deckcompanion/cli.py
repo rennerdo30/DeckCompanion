@@ -38,6 +38,7 @@ def game(paths, ident, discovery=None, metadata=None, available=None):
             "last_played": steam.last_played(paths).get(ident),
             **({"kind": entry["kind"]} if entry and "kind" in entry else {}),
             **takeover.fields(state(paths), ident, discovery[1]), "valve_recommendation": valve,
+            "options": {"proton": True, "takeover": True},
             "proton": {"name": selected["name"], "reason": reason} if selected else None}
 
 
@@ -50,6 +51,17 @@ def parser():
     root = Parser(prog="deckcompanion")
     root.add_argument("--json", action="store_true")
     commands = root.add_subparsers(dest="command", required=True)
+    catalog = commands.add_parser("launchers")
+    catalog.add_argument("--json", action="store_true")
+    launcher = commands.add_parser("launcher")
+    launcher.add_argument("action", choices=("install", "remove"))
+    launcher.add_argument("id")
+    launcher.add_argument("--purge", action="store_true")
+    launcher.add_argument("--json", action="store_true")
+    helper = commands.add_parser("launcher-helper", help=argparse.SUPPRESS)
+    helper.add_argument("id")
+    helper.add_argument("token")
+    helper.add_argument("--json", action="store_true")
     add = commands.add_parser("add-game")
     add.add_argument("--exe", required=True)
     add.add_argument("--name", required=True)
@@ -111,6 +123,17 @@ def parser():
 
 def execute(args, paths):
     name = args.command
+    if name in ("launchers", "launcher", "launcher-helper"):
+        from . import launchers
+        if name == "launchers":
+            return launchers.listing(paths)
+        if name == "launcher-helper":
+            return launchers.run(paths, args.id, args.token)
+        if args.action == "remove":
+            return launchers.remove(paths, args.id, args.purge)
+        if args.purge:
+            raise Error("invalid_arguments", "--purge is only valid with launcher remove")
+        return launchers.schedule(paths, args.id)
     if name in ("proton", "proton-helper"):
         from . import proton
         if name == "proton-helper":
@@ -192,6 +215,16 @@ def execute(args, paths):
             result["log_tail"] = []
         return result
     if name == "game-option":
+        from . import nonsteam
+        registered = next((g for g in data.get("non_steam", {}).values()
+                           if g["appid"] == args.appid and not g.get("removed")), None)
+        if registered:
+            if args.takeover is not None:
+                raise Error("invalid_action", "Non-Steam games do not support takeover")
+            if args.proton is not None:
+                registered["proton_override"] = None if args.proton == "auto" else args.proton
+            save_state(paths, data)
+            return nonsteam.game(paths, registered)
         saved = data["games"].setdefault(args.appid, {})
         if args.takeover is not None:
             saved["takeover_excluded"] = args.takeover == "off"
@@ -283,7 +316,7 @@ def main(argv=None):
             # Never hold state.lock while starting a helper which will need it.
             from .apply_helper import schedule
             result = schedule(paths)
-        elif args.command in ("proton", "proton-helper", "update"):
+        elif args.command in ("proton", "proton-helper", "update", "launchers", "launcher", "launcher-helper"):
             result = execute(args, paths)
         else:
             with locked(paths):

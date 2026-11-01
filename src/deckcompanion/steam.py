@@ -436,12 +436,13 @@ def prepare_apply(paths):
         changes.append({"action": "shortcut"})
     pending_games = [g for g in data.get("non_steam", {}).values() if g.get("pending")]
     if pending_games:
-        from .nonsteam import shortcut_bytes as game_shortcut_bytes
+        from .nonsteam import shortcut_bytes as game_shortcut_bytes, shortcut_artwork as game_shortcut_artwork
         path = shortcut_path(paths)
         payload = next((b for p, b in writes if p == path),
                        path.read_bytes() if path.exists() else vdf.binary_dumps({"shortcuts": {}}))
         for game in pending_games:
             payload = game_shortcut_bytes(paths, payload, game)
+            writes.extend(game_shortcut_artwork(paths, path, game))
             changes.append({"slug": game["slug"], "action": game["pending"]})
             game["pending"] = None
         writes = [(p, b) for p, b in writes if p != path] + [(path, payload)]

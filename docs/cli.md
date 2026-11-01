@@ -475,3 +475,162 @@ while Steam runs it schedules the detached helper without waiting for shutdown.
 It requires Steam closed, restores prior mappings, and preserves user changes and
 state/cache/backups. `preserved` lists modified files. See the README for migration.
 No command or integration has been verified on hardware.
+
+## Launcher catalog and installation (DC-30)
+
+`launchers --json` returns `{"launchers":[LAUNCHER,...]}` in catalog order. The
+bundled IDs are `epic`, `gog`, `ea`, `ubisoft`, `battlenet`. Each LAUNCHER has exactly
+the following fields (initial Epic row on a default Linux installation):
+
+```json
+{"id":"epic","name":"Epic Games Launcher","store":"egs",
+ "source_url":"https://store.epicgames.com/en-US/download",
+ "installer_url":"https://launcher-public-service-prod06.ol.epicgames.com/launcher/api/installer/download/EpicGamesLauncherInstaller.msi",
+ "installer_type":"msi","installer_args":["/qn","/norestart"],"unattended":true,
+ "installed_exe":"pfx/drive_c/Program Files (x86)/Epic Games/Launcher/Portal/Binaries/Win32/EpicGamesLauncher.exe",
+ "gameid":"umu-default","checksum_sha256":null,
+ "state":"not_installed","installed":false,
+ "prefix":"/home/deck/.local/share/deckcompanion/prefixes/launcher-epic",
+ "exe":"/home/deck/.local/share/deckcompanion/prefixes/launcher-epic/pfx/drive_c/Program Files (x86)/Epic Games/Launcher/Portal/Binaries/Win32/EpicGamesLauncher.exe",
+ "slug":null,"appid":null,"shortcut_pending":null,
+ "art":{"portrait":null,"hero":null,"header":null,"logo":null},
+ "warnings":["Vendor checksum not published; SHA256 records downloaded bytes, not vendor authenticity."],
+ "job":null,
+ "status_file":"/home/deck/.local/share/deckcompanion/launcher-status/epic.json"}
+```
+
+`launcher install ID --json` always schedules a detached Linux user service and
+returns `{"scheduled":true,"launcher":LAUNCHER}`. An already registered launcher
+with its executable present returns `{"scheduled":false,"launcher":LAUNCHER}`.
+There is no synchronous install mode. Poll `launchers --json` until the row's
+state is `installed` or `failed`. `state` is exactly one of `not_installed`,
+`installing`, `installed`, `failed`. `installed` requires a live registration and
+the expected executable; an executable in a preserved but removed prefix alone
+does not count. A failed job takes precedence over installed state.
+
+While scheduled, the exact `job` object is (token/time values vary):
+
+```json
+{"active":true,"phase":"scheduled","token":"5a029f3b2d774b37a7ce37522e851d32",
+ "started":1793538000.0,"updated_at":"2026-11-01T13:00:00+00:00",
+ "pid":null,"installer_pid":null,"sha256":null,"downloaded_bytes":0,
+ "error":null,
+ "warnings":["Vendor checksum not published; SHA256 records downloaded bytes, not vendor authenticity."]}
+```
+
+`phase` progresses through `scheduled`, `preparing`, `downloading`, `verifying`,
+`installing`, `registering`, `finished`, or `failed`. `pid` becomes the helper PID;
+`installer_pid` becomes its recorded installer PID. Once downloaded, `sha256`
+becomes the 64-character lowercase digest and `downloaded_bytes` the final byte
+count. Transfers expose phase progress, not a byte percentage. During installation
+`log_file` is added with the absolute path to `logs/launcher-ID.log`. Terminal
+jobs set `active:false`; failure sets `error` to a string. A service that disappears
+is reported failed after its 1,560-second deadline. Registration from an existing
+executable skips downloading/installing, so those fields may remain null/zero.
+
+The worker uses the same umu runtime/prefix/Proton preparation as `run-umu`.
+MSI installers run as `umu-run msiexec /i Z:\path\installer.msi ARGS...`;
+EXE installers run as `umu-run /absolute/installer.exe ARGS...`. No shell evaluates
+catalog arguments. Download supervision allows 300 seconds and at most 512 MiB,
+with HTTPS URL/final redirect checks and installer format checks. A catalog SHA256
+is enforced when supplied; otherwise the downloaded hash and warning are retained
+in the job receipt. The installer has a 1,200-second timeout, and the user service
+caps its entire process tree at 1,560 seconds. No root or persistent environment
+changes are needed. Missing Linux/systemd support returns `detach_unavailable`;
+duplicate active jobs/removal during installation return `busy`.
+
+The expected executable must exist before registration. Each registration has
+`slug:"launcher-ID"`, `launcher:"ID"`, `kind:"non_steam"`, and its own prefix
+`<data>/prefixes/launcher-ID/pfx`. The Steam shortcut runs `run-umu launcher-ID`.
+`appid` is a string; `shortcut_pending` is `add`, `remove`, or null. Installation
+queues the existing guarded `apply` transaction and does not stop Steam. After
+`shortcut_pending:"add"`, use the existing `apply --restart-steam --json` flow.
+Only then is the shortcut available in Steam.
+
+Local artwork is optional: `<data>/assets/launchers/ID/{portrait,header,hero,logo,icon}.png`.
+The four art fields contain existing absolute paths or null, preferring those
+files over Steam's local cache. The icon is used on the shortcut; the other images
+are copied to Steam's selected-user grid through guarded apply. No art downloads.
+
+`launcher remove ID [--purge] --json` returns
+`{"id":"epic","removed":true,"prefix_preserved":true,"steam_changes_pending":true,"launcher":LAUNCHER}`.
+Without `--purge`, the prefix, installed games and saves remain. Reinstall adopts
+an existing executable without running its installer, preserving shortcut identity
+and Proton preferences. `--purge` deletes only that launcher's contained prefix,
+including its games/saves, and returns `prefix_preserved:false`; redirected roots
+are refused. Steam removal is queued for apply. `steam_changes_pending` is false
+if no live registration existed. Installer failure never deletes the prefix.
+Errors use the normal `{"error":{"code":"...","message":"..."}}` envelope.
+There is no scan/import-games command in this slice.
+
+### Independent catalog data and provenance
+
+All IDs, names, stores, GAMEIDs, installer URLs/arguments and installed paths live
+in `content/launchers.toml`, not Python. Format: `schema_version = 1`, a string
+`version`, and `[[launchers]]` tables with the preset fields shown above.
+`checksum_sha256` is optional in TOML and becomes null in JSON when absent.
+The loader `content.launchers(paths)` prefers
+`<cache>/index.json["launchers"] = {"toml":"...","sha256":"..."}`. It checks
+the SHA256 against the UTF-8 TOML text before parsing and validating it. Invalid
+checksum, TOML or schema falls back to the validated bundled file. Source selection
+is logged through Python's `deckcompanion.content` logger (INFO; rejection WARNING).
+Loading does not fetch an index or write the cache. DC-36 owns channel updates.
+
+Validation bounds the catalog to 256 KiB and 64 unique safe IDs. It requires HTTPS
+URLs without credentials, safe prefix-contained EXE paths, valid GAMEIDs/checksums,
+typed installer metadata and bounded string arguments. Unknown schema versions
+are refused. Bundled data is included in source installs and release archives.
+
+Vendor URLs checked against primary download pages/endpoints on **2026-11-01**:
+
+| ID | Official installer | Args | STORE |
+| --- | --- | --- | --- |
+| epic | [Epic installer endpoint](https://launcher-public-service-prod06.ol.epicgames.com/launcher/api/installer/download/EpicGamesLauncherInstaller.msi) | `/qn /norestart` via msiexec | egs |
+| gog | [GOG Galaxy web installer](https://webinstallers.gog-statics.com/download/GOG_Galaxy_2.0.exe) | none; interactive | gog |
+| ea | [EA app installer](https://origin-a.akamaihd.net/EA-Desktop-Client-Download/installer-releases/EAappInstaller.exe) | `/quiet /norestart` | ea |
+| ubisoft | [Ubisoft Connect installer](https://static3.cdn.ubi.com/orbit/launcher_installer/UbisoftConnectInstaller.exe) | `/S` | ubisoft |
+| battlenet | [Battle.net installer endpoint](https://downloader.battle.net//download/getInstallerForGame?os=win&gameProgram=BATTLENET_APP&version=Live) | none; interactive | battlenet |
+
+Primary pages: [Epic](https://store.epicgames.com/en-US/download),
+[GOG](https://www.gog.com/galaxy), [EA](https://www.ea.com/ea-app),
+[Ubisoft](https://www.ubisoft.com/en-us/ubisoft-connect/download) (its download
+redirect resolves to the CDN above), [Battle.net](https://download.battle.net/en-us/?platform=windows).
+Epic's endpoint resolved to the official `EpicInstaller-20.3.3.msi` CDN asset;
+Battle.net resolved to the official `1.0.68/Battle.net-Setup.exe`. Other EXEs
+returned Windows executable headers; Ubisoft reported 262,918,936 bytes.
+Silent arguments describe installer conventions, not a verified Wine installation.
+MSI quiet/no-restart behavior is documented by [Microsoft](https://learn.microsoft.com/en-us/windows/win32/msi/standard-installer-command-line-options),
+and `/S` by [NSIS](https://nsis.sourceforge.io/Docs/Chapter3.html).
+GOG's web installer and Battle.net require completing their visible installer and
+closing it afterward. Sign-in is always the user's action, even with unattended
+installation. No credentials are collected by DeckCompanion.
+
+The [official umu database](https://raw.githubusercontent.com/Open-Wine-Components/umu-database/main/umu-database.csv)
+had no exact matches for these launchers; all five use `GAMEID=umu-default`.
+No vendor-published installer checksum was found, so all bundled checksums are
+absent; recorded hashes are integrity receipts, not vendor authenticity proofs.
+No umu-launcher or NonSteamLaunchers source was copied or imported.
+
+### Game options capability flags
+
+Every GAME/GAMES object (including add-game and registered launcher game results)
+includes `options`. Steam games return
+`{"options":{"proton":true,"takeover":true}}`; registered non-Steam/umu games
+and launchers return `{"options":{"proton":true,"takeover":false}}`.
+Clients should enable controls using these flags.
+
+`game-option APPID --proton NAME|auto --json` also updates registered non-Steam
+games/launchers and returns the complete GAME. `proton_override` persists in that
+non-Steam registration (null for auto). `run-umu` sets `PROTONPATH` to the installed
+selected build; preview and splash use that same selection. An explicit usable
+override wins over a non-Steam recipe pin. Auto restores the existing umu rule:
+installed recipe pin, otherwise preferred installed GE, otherwise newest installed
+Proton. A missing override falls back to GE/newest and is retained for later use.
+No runtime is downloaded by selection. Steam selection precedence is unchanged.
+Non-Steam `--takeover` returns `invalid_action` without changing either registry.
+
+**Not verified on hardware:** actual vendor silent switches/install paths through
+umu, interactive GOG/Battle.net windows and sign-in, Game Mode window focus and
+worker survival, first umu runtime preparation, Steam shortcut/artwork apply,
+launcher/game execution with manual Proton choice, prefix/save preservation and
+explicit purge. Parent owns deployment and those checks. No UI files were edited.

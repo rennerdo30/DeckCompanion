@@ -2,12 +2,85 @@
 import configparser
 import hashlib
 import io
+import logging
 from pathlib import Path
+import re
 import stat
+import tomllib
+from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 import zipfile
 from . import net, steam
 from .common import Error, atomic, inside, read_json, write_json
+
+
+def validate_launchers(catalog):
+    def require(ok, message):
+        if not ok:
+            raise Error("invalid_launcher_catalog", message)
+    require(type(catalog.get("schema_version")) is int and catalog["schema_version"] == 1,
+            "Unsupported launcher catalog schema")
+    require(isinstance(catalog.get("version"), str) and bool(catalog["version"]), "Catalog version is required")
+    rows = catalog.get("launchers")
+    require(isinstance(rows, list) and 0 < len(rows) <= 64, "Expected 1 to 64 launcher presets")
+    seen, result = set(), []
+    for row in rows:
+        require(isinstance(row, dict), "Launcher preset must be a table")
+        require(row.keys() <= {"id", "name", "store", "gameid", "source_url", "installer_url", "installed_exe",
+                               "installer_type", "installer_args", "unattended", "checksum_sha256"},
+                "Unknown launcher preset field")
+        for key in ("id", "name", "store", "gameid", "source_url", "installer_url", "installed_exe", "installer_type"):
+            require(isinstance(row.get(key), str) and 0 < len(row[key]) <= 4096 and
+                    not any(ord(c) < 32 for c in row[key]), f"Invalid launcher {key}")
+        require(bool(re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", row["id"])) and row["id"] not in seen,
+                "Invalid or duplicate launcher id")
+        seen.add(row["id"])
+        require(len(row["name"]) <= 128 and bool(re.fullmatch(r"[a-z0-9_-]{1,32}", row["store"])),
+                "Invalid launcher name or store")
+        require(bool(re.fullmatch(r"umu-[A-Za-z0-9][A-Za-z0-9_-]{0,100}", row["gameid"])), "Invalid launcher GAMEID")
+        for key in ("source_url", "installer_url"):
+            url = urlsplit(row[key])
+            require(url.scheme == "https" and bool(url.hostname) and not url.username and not url.password,
+                    "Launcher URLs must use HTTPS without credentials")
+        require(row["installer_type"] in ("exe", "msi"), "Unsupported installer type")
+        require(type(row.get("unattended")) is bool, "unattended must be boolean")
+        args = row.get("installer_args")
+        require(isinstance(args, list) and len(args) <= 64 and all(isinstance(a, str) and len(a) <= 4096 and
+                not any(ord(c) < 32 for c in a) for a in args), "Installer arguments must be strings")
+        inside(Path.cwd(), row["installed_exe"])
+        require(row["installed_exe"].startswith("pfx/drive_c/") and row["installed_exe"].lower().endswith(".exe"),
+                "Installed launcher must be an exe inside pfx/drive_c")
+        sha = row.get("checksum_sha256")
+        require(sha is None or isinstance(sha, str) and bool(re.fullmatch(r"[a-f0-9]{64}", sha)), "Invalid installer SHA256")
+        result.append(dict(row, checksum_sha256=sha))
+    return result
+
+
+def launchers(paths):
+    """Read DC-36's verified cache entry, with a validated bundled fallback."""
+    log = logging.getLogger(__name__)
+    try:
+        cached = read_json(paths.cache / "index.json", {}).get("launchers")
+        if cached is not None:
+            text = cached["toml"]
+            if not isinstance(text, str) or len(text.encode()) > 256 * 1024:
+                raise ValueError("Invalid launcher TOML size")
+            if hashlib.sha256(text.encode()).hexdigest() != cached["sha256"]:
+                raise ValueError("Launcher catalog checksum mismatch")
+            result = validate_launchers(tomllib.loads(text))
+            log.info("Launcher catalog source: cached index launchers")
+            return result
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, Error):
+        log.warning("Cached launcher catalog rejected; using bundled content/launchers.toml")
+    source = Path(__file__).resolve().parents[2] / "content/launchers.toml"
+    try:
+        if source.stat().st_size > 256 * 1024:
+            raise ValueError("Launcher catalog exceeds 256 KiB")
+        result = validate_launchers(tomllib.loads(source.read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, Error) as exc:
+        raise Error("invalid_launcher_catalog", "Bundled launcher catalog is missing or invalid") from exc
+    log.info("Launcher catalog source: bundled content/launchers.toml")
+    return result
 
 
 def root_for(item, prefix, game):
