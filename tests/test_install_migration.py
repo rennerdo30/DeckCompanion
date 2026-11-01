@@ -148,7 +148,7 @@ def test_install_uninstall_cli_and_desktop_contract(paths, source, capsys):
     command = shlex.split(parser["Desktop Entry"]["Exec"])
     assert command[:7] == ["konsole", "--hold", "-e", "bash", "-o", "pipefail", "-c"] and len(command) == 8
     assert '--connect-timeout 10 --max-time 30' in command[7]
-    assert 'api.github.com/repos/rennerdo30/DeckCompanion/releases?per_page=100' in command[7]
+    assert 'https://deckcompanion.renner.dev/install.sh' in command[7]
     assert 'releases/latest' not in command[7] and command[7].endswith('| timeout 300s sh')
     assert 'git pull' not in (ROOT / "DeckCompanion").read_text().replace('never runs git pull', '')
 

@@ -1,0 +1,61 @@
+name: Recipe submission
+description: Share a recipe (Proton, fixes, mods, settings) that makes a game run well on the Steam Deck
+title: "Recipe: <game name> (<app id>)"
+labels: ["recipe"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing a recipe. The format and rules are in [CONTRIBUTING.md](https://github.com/rennerdo30/DeckCompanion/blob/main/CONTRIBUTING.md). Generic Wine/Proton fixes that every Proton user needs belong upstream in [umu-protonfixes](https://github.com/Open-Wine-Components/umu-protonfixes).
+  - type: input
+    id: game
+    attributes:
+      label: Game and Steam app ID
+      placeholder: "Farming Simulator 25 (2300320)"
+    validations:
+      required: true
+  - type: textarea
+    id: recipe
+    attributes:
+      label: Recipe (TOML)
+      description: The complete recipes/<appid>.toml file.
+      render: toml
+      value: |
+        schema_version = 1
+        appid = ""
+        name = ""
+        version = "1.0.0"
+        notes = "What this recipe does and anything the player needs to do in the game."
+
+        [runtime]
+        proton = "GE-Proton"
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What does it fix or improve?
+      placeholder: "Crash at start without d3dcompiler_47; text too small on the Deck without the handheld mod."
+    validations:
+      required: true
+  - type: input
+    id: tested
+    attributes:
+      label: Tested on
+      placeholder: "SteamOS 3.9.5, DeckCompanion 0.4.6, GE-Proton11-11, played 30 minutes"
+    validations:
+      required: true
+  - type: textarea
+    id: mods
+    attributes:
+      label: Mods and their licences (if any)
+      description: Official source of every mod and its licence (must allow download/redistribution).
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: The recipe is data only (no scripts) and every mod comes from its official source.
+          required: true
+        - label: I launched and played the game with this recipe on a Steam Deck.
+          required: true

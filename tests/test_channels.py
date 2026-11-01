@@ -466,19 +466,13 @@ def test_bootstrap_engine_selector_matches_mixed_release_policy(monkeypatch):
     assert namespace["release_index"]() == "https://example.org/v2/index.json"
 
 
-def test_readme_and_desktop_installer_select_engine_asset(monkeypatch, capsys):
+def test_readme_and_desktop_installer_use_the_website_bootstrap():
     import configparser
     import shlex
-    import urllib.request
     parser = configparser.ConfigParser(interpolation=None)
     parser.read(ROOT / "DeckCompanion-Installer.desktop")
     command = shlex.split(parser["Desktop Entry"]["Exec"])[7]
-    assert command in (ROOT / "README.md").read_text()
-    selector = command.split("python3 -c '", 1)[1].split("'", 1)[0]
-    listing = [release("v1.0.0", "install.sh", "https://example.org/v1/install.sh", date="2026-11-01"),
-               release("content-2026.11.01.1", date="2026-11-02"), release("decky-v10.0.0", date="2026-11-03"),
-               dict(release("v2.0.0", date="2026-11-04"), prerelease=True),
-               dict(release("v3.0.0", date="2026-11-05"), draft=True)]
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: io.BytesIO(json.dumps(listing).encode()))
-    exec(selector, {})
-    assert capsys.readouterr().out.strip() == "https://example.org/v1/install.sh"
+    # The website serves the repository's install.sh, which selects the newest stable v* release.
+    assert "https://deckcompanion.renner.dev/install.sh" in command
+    assert "curl -fsSL https://deckcompanion.renner.dev/install.sh | sh" in (ROOT / "README.md").read_text()
+    assert "releases/latest" not in command and command.endswith("| timeout 300s sh")

@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
 Name=Install DeckCompanion
-Comment=Install DeckCompanion in your home directory and restart Steam
+Comment=Install DeckCompanion in your home folder and add it to your Steam library
 Terminal=false
 Icon=system-software-install
-Exec=konsole --hold -e bash -o pipefail -c "curl -fsSL --proto =https --proto-redir =https --connect-timeout 10 --max-time 30 \"$(timeout 60s python3 -c 'import json,re,urllib.request; releases=[]; exec(\"for page in range(1,11):\\n with urllib.request.urlopen(\\\"https://api.github.com/repos/rennerdo30/DeckCompanion/releases?per_page=100&page=\\\"+str(page),timeout=5) as response: batch=json.loads(response.read(8388609))\\n releases.extend(batch)\\n if len(batch)<100: break\\nelse: raise ValueError(\\\"Release listing exceeds bounded pagination\\\")\"); r=max((r for r in releases if not r.get(\"draft\") and not r.get(\"prerelease\") and re.fullmatch(r\"v[0-9]+[.][0-9]+[.][0-9]+\",r.get(\"tag_name\",\"\"))),key=lambda r:r.get(\"published_at\",\"\")); print(next(a[\"browser_download_url\"] for a in r[\"assets\"] if a[\"name\"]==\"install.sh\"))')\" | timeout 300s sh"
+Exec=konsole --hold -e bash -o pipefail -c "curl -fsSL --proto =https --proto-redir =https --connect-timeout 10 --max-time 30 https://deckcompanion.renner.dev/install.sh | timeout 300s sh"
 Categories=Utility;
