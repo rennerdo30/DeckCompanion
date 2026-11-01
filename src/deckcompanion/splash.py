@@ -12,9 +12,11 @@ STARTED_PIDS = []
 MAX_SECONDS = 10.0
 HOLD_SECONDS = 120
 HARD_TIMEOUT = 130
-# splash_parallel: the game starts right away and the splash runs beside it (owner,
-# 2026-11-01). Off = the old behaviour: show the splash first, then start the game.
-DEFAULTS = {"splash": True, "splash_seconds": 4.0, "splash_parallel": True,
+# splash_parallel: start the game right away and show the splash beside it. Off by
+# default: on the Deck (SteamOS 3.9, 2026-11-01) gamescope shows the game's first,
+# empty window over the splash, and the GAMESCOPE_EXTERNAL_OVERLAY flag did not make
+# the splash visible. Default = splash first, then the game.
+DEFAULTS = {"splash": True, "splash_seconds": 4.0, "splash_parallel": False,
             "show_games_without_recipe": True, "check_updates_on_start": True,
             "auto_install_ge": True, "cleanup_old_ge": True, "takeover_all": True}
 

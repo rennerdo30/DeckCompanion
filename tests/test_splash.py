@@ -35,7 +35,7 @@ def test_settings_defaults_clamp_persist_and_preserve(paths):
     save_state(paths, {"games": {"42": {"mods": {"keep": False}}}, "settings": {"future": 9}})
     assert cli.execute(command(), paths) == {"splash": True, "splash_seconds": 4,
         "show_games_without_recipe": True, "check_updates_on_start": True, "future": 9,
-        "auto_install_ge": True, "cleanup_old_ge": True, "splash_parallel": True, "takeover_all": True}
+        "auto_install_ge": True, "cleanup_old_ge": True, "splash_parallel": False, "takeover_all": True}
     result = cli.execute(command("--splash", "off", "--splash-seconds", "99"), paths)
     assert result["splash"] is False and result["splash_seconds"] == 10
     assert cli.execute(command(), paths)["splash"] is False
@@ -187,5 +187,6 @@ def test_parallel_splash_starts_game_immediately(paths, runtime, monkeypatch):
     assert files[0].exists() and files[0].parent.name == "run"  # survives the exec into Proton
 
 
-def test_parallel_splash_is_the_default(paths):
-    assert cli.execute(command(), paths)["splash_parallel"] is True
+def test_splash_first_is_the_default(paths):
+    # Parallel mode is opt-in: gamescope showed the game's empty window over the splash.
+    assert cli.execute(command(), paths)["splash_parallel"] is False
