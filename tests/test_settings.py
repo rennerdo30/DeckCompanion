@@ -10,7 +10,8 @@ def invoke(paths, *args):
 def test_general_settings_round_trip_and_alias_precedence(paths):
     values = invoke(paths, "--set", "show_games_without_recipe=false", "--set", "check_updates_on_start=off",
                     "--set", "splash=false", "--set", "splash_seconds=99")
-    assert values == {"splash": False, "splash_seconds": 6, "show_games_without_recipe": False, "check_updates_on_start": False}
+    assert values == {"splash": False, "splash_seconds": 6, "show_games_without_recipe": False, "check_updates_on_start": False,
+                      "auto_install_ge": True, "cleanup_old_ge": True}
     assert invoke(paths) == values
     values = invoke(paths, "--set", "splash=false", "--splash", "on", "--set", "splash_seconds=1", "--splash-seconds", "3.5")
     assert values["splash"] is True and values["splash_seconds"] == 3.5

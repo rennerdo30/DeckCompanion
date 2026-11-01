@@ -45,6 +45,9 @@ var preview_backend: Node
 var preview_note_id := ""
 var preview_notes: Dictionary = {}
 var update_backend: Node
+var proton_backend: Node
+var proton_data: Dictionary = {}
+var proton_poll := 0.0
 var startup_settings_read := false
 var licenses: AcceptDialog
 var screen_scroll: ScrollContainer
@@ -61,6 +64,9 @@ func _ready() -> void:
 	update_backend = Backend.new()
 	add_child(update_backend)
 	update_backend.completed.connect(_update_completed)
+	proton_backend = Backend.new()
+	add_child(proton_backend)
+	proton_backend.completed.connect(_proton_completed)
 	# The list contract does not include notes on older engines. Read detail separately
 	# without locking navigation or rebuilding the panel while focus moves.
 	preview_backend = Backend.new()
@@ -502,6 +508,8 @@ func _settings_screen() -> void:
 	var updates := _card(column)
 	updates.add_child(_label("Updates",23))
 	_setting_toggle(updates,"check_updates_on_start","Check when DeckCompanion opens","Check the engine and recipe index in the background when the UI opens.")
+	_setting_toggle(updates,"auto_install_ge","Install newest GE-Proton","Updates always install builds pinned by enabled recipes. Also install the newest GE-Proton release.")
+	_setting_toggle(updates,"cleanup_old_ge","Clean up old GE-Proton","Keep enabled recipe pins, the newest GE and all builds installed elsewhere. Cleanup waits until Steam is closed.")
 	_button("Checking…" if update_backend.busy else "Check now",_check_updates,updates,"check",not update_backend.busy)
 	var about := _card(column)
 	about.add_child(_label("About",23))
@@ -520,14 +528,33 @@ func _setting_toggle(parent: Node, key: String, title: String, explanation: Stri
 	_button(title + (": On" if enabled else ": Off"),func(): _request("settings",["--set",key+"="+str(not enabled).to_lower()]),parent,key,not settings.is_empty())
 
 func _check_updates() -> void:
-	if not update_backend.busy: update_backend.request("update")
+	if not update_backend.busy: update_backend.request("update",["--detach"])
 
 func _update_completed(_command: String, data: Dictionary) -> void:
 	if data.has("error"): notice = "Update check: " + str(data.error.message)
+	elif data.get("scheduled",false):
+		proton_data.active = true
+		notice = "Updates are running in the background. You can close DeckCompanion."
 	else:
 		update = data
 		notice = "Update check complete."
 	if tab != 0: _render()
+
+func _proton_completed(_command: String, data: Dictionary) -> void:
+	if data.has("error"):
+		notice = "Proton builds: " + str(data.error.message)
+		proton_data.active = false
+	else:
+		if data.get("scheduled",false): proton_data.merge(data,true)
+		else: proton_data = data
+		var job: Dictionary = data.get("job",{})
+		if job.get("state") == "failed": notice = "Proton builds: " + str(job.get("error","Download failed"))
+		var result: Dictionary = job.get("result",{})
+		if result.has("engine"): update = result
+	if tab == 1: _render()
+
+func _install_proton(name: String) -> void:
+	if not proton_backend.busy: proton_backend.request("proton",["install",name,"--detach"])
 
 func _show_license(third_party: bool) -> void:
 	for child in licenses.get_children():
@@ -564,10 +591,21 @@ func _update_status(column: Node) -> void:
 		age = ("Fetched just now" if hours == 0 else "Fetched %s hour%s ago" % [hours,"" if hours == 1 else "s"]) + "  ·  " + fetched
 	_paragraph(index,age)
 	var proton := _card(column)
-	proton.add_child(_label("Installed Proton builds",23))
-	for build in status.get("proton",[]): _paragraph(proton,str(build.get("name","Unknown build")) + "\n" + str(build.get("path","")))
-	if status.get("proton",[]).is_empty(): _paragraph(proton,"No Proton builds found. Install one through Steam to get started.")
-	_button("Refresh system status",func(): _request("status"),proton,"status")
+	proton.add_child(_label("Proton builds",23))
+	for build in proton_data.get("builds",[]):
+		var phase: String = build.get("state","wanted")
+		var message := "Installed" if phase == "installed" else phase.capitalize()
+		if phase == "downloading": message = "Downloading %s %%" % build.get("percent",0)
+		if phase == "failed": message = "Failed: " + str(build.get("error","Unknown error"))
+		var wanted_by: Array = build.get("wanted_by",[])
+		if not wanted_by.is_empty(): message += "  ·  Wanted by " + ", ".join(wanted_by)
+		if build.get("latest",false): message += "  ·  Newest GE"
+		if build.has("total_bytes"): message += "  ·  %.0f / %.0f MiB" % [float(build.get("downloaded_bytes",0))/1048576,float(build.total_bytes)/1048576]
+		if build.has("installed_bytes"): message += "  ·  %.0f MiB on disk" % (float(build.installed_bytes)/1048576)
+		_paragraph(proton,str(build.name) + "\n" + message)
+		if not build.get("installed",false): _button("Install",_install_proton.bind(str(build.name)),proton,"proton_"+str(build.name),not proton_data.get("active",false) and not proton_backend.busy)
+	if proton_data.is_empty(): _paragraph(proton,"Reading installed and wanted builds…")
+	_button("Refresh Proton builds",func(): proton_backend.request("proton"),proton,"proton_refresh",not proton_backend.busy)
 
 func _toggle_game() -> void:
 	if not detail or not selected.get("has_recipe",false) or backend.busy: return
@@ -586,6 +624,7 @@ func _switch_tab(value: int) -> void:
 	tab = value
 	detail = false
 	last_focus = ["games","updates","settings"][value]
+	if value == 1 and not proton_backend.busy: proton_backend.request("proton")
 	_render()
 
 func _back() -> void:
@@ -615,6 +654,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 func _process(delta: float) -> void:
+	proton_poll += delta
+	if proton_poll >= 1.0 and proton_data.get("active",false) and not proton_backend.busy:
+		proton_poll = 0.0
+		proton_backend.request("proton")
 	var scroll: ScrollContainer = license_scroll if licenses.visible else (log_view if detail else (screen_scroll if tab != 0 else preview_scroll))
 	if is_instance_valid(scroll) and not dialog.visible:
 		var axis := 0.0

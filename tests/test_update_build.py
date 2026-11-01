@@ -129,7 +129,8 @@ def test_release_api_mock_and_initial_offline(paths, monkeypatch):
         write_json(target, {"assets": [{"name": "index.json", "browser_download_url": "https://example.org/index"}]} if len(urls) == 1 else candidate)
     monkeypatch.setattr(net, "fetch", fetch)
     assert update.update(paths)["index"]["updated"] is True
-    assert urls == [update.RELEASE_API, "https://example.org/index"]
+    from deckcompanion.proton import API
+    assert urls == [update.RELEASE_API, "https://example.org/index", API + "/latest"]
 
 
 def builder_module():

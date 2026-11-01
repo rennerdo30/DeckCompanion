@@ -1,12 +1,9 @@
 """Prepare locally, then replace this process with Proton. Optional fixes never block play."""
 import os
 from pathlib import Path
-import shutil
-import tempfile
-import tarfile
 import sys
-from . import archives, content, localfix, net, recipes, splash, steam
-from .common import Error, atomic, app_id, component, locked, now, read_json, save_state, state
+from . import content, localfix, net, recipes, splash, steam
+from .common import Error, atomic, app_id, locked, now, read_json, save_state, state
 
 
 def select_proton(available, recipe):
@@ -29,27 +26,6 @@ def resolve_proton(paths, recipe, budget, log):
     if reason == "pinned":
         log(f"Using pinned {selected['name']}")
         return Path(selected["path"])
-    if pin != "GE-Proton" and runtime.get("url") and runtime.get("sha256"):
-        staging = None
-        try:
-            component(pin)
-            source = net.cached(paths, runtime["url"], runtime["sha256"], budget)
-            paths.tools.mkdir(parents=True, exist_ok=True)
-            staging = Path(tempfile.mkdtemp(prefix=".dc-proton-", dir=paths.tools))
-            archives.unpack(source, staging, budget)
-            root = staging / pin
-            if not (root / "proton").is_file():
-                raise Error("invalid_proton", "Runtime archive lacks the pinned Proton executable")
-            target = paths.tools / pin
-            if target.exists():
-                raise Error("invalid_proton", "Preserving an existing runtime directory")
-            os.replace(root, target)
-            return target
-        except (Error, OSError, ValueError, tarfile.TarError) as exc:
-            log(f"Pinned Proton unavailable: {exc}")
-        finally:
-            if staging:
-                shutil.rmtree(staging)
     if available:
         # Recipe fallback retains its GE preference; unconfigured games use newest.
         fallback = selected

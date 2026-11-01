@@ -61,9 +61,14 @@ files, saves and downloaded Proton builds. See [Uninstall](#uninstall) below.
   Valve major. Aliases resolve once; non-Proton tools are excluded.
 - Engine preparation errors log a warning and launch the selected or newest Proton
   with original arguments. Only absence of any usable Proton prevents handoff.
-- Cached recipes/assets work offline. Optional launch downloads share a two-second
-  wall budget. An unavailable pin falls back to installed Proton and logs why.
-  Preinstall large runtimes: launch is intentionally too short for most GE downloads.
+- Cached recipes/assets work offline. Launch never downloads Proton; an unavailable
+  pin falls back to installed Proton. Optional mod downloads retain their two-second budget.
+- Updates install GE-Proton pinned by enabled recipes plus the newest GE by default.
+  The Updates tab shows wanted builds, Install/retry, progress and disk use. Downloads
+  run as detached user services so closing the UI does not stop them. Settings offers
+  `auto_install_ge` and `cleanup_old_ge` (both on by default). Cleanup keeps recipe pins,
+  newest GE, external builds and locally modified installs, and waits while Steam runs.
+  CLI: `deckcompanion proton --json` and `deckcompanion proton install GE-Proton11-11 --json`.
 - Managed protonfixes localfixes chain the bundled upstream fix first. User localfixes
   are preserved. Wine installs/registry steps run once per prefix.
 - SHA256 and manifests track mods. FS25 Deck Mode stays zipped in FS25's mods folder.

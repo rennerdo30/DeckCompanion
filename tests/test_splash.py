@@ -34,7 +34,8 @@ def command(*args):
 def test_settings_defaults_clamp_persist_and_preserve(paths):
     save_state(paths, {"games": {"42": {"mods": {"keep": False}}}, "settings": {"future": 9}})
     assert cli.execute(command(), paths) == {"splash": True, "splash_seconds": 2.5,
-        "show_games_without_recipe": True, "check_updates_on_start": True, "future": 9}
+        "show_games_without_recipe": True, "check_updates_on_start": True, "future": 9,
+        "auto_install_ge": True, "cleanup_old_ge": True}
     result = cli.execute(command("--splash", "off", "--splash-seconds", "99"), paths)
     assert result["splash"] is False and result["splash_seconds"] == 6
     assert cli.execute(command(), paths)["splash"] is False

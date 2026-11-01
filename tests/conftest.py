@@ -9,6 +9,7 @@ def no_real_network(monkeypatch):
     def deny(*args, **kwargs):
         raise AssertionError("Tests must mock network access")
     monkeypatch.setattr(net, "fetch", deny)
+    monkeypatch.setattr(net, "download", deny, raising=False)
     # A test of the worker supervisor restores only this callable and mocks Popen.
 
 

@@ -10,7 +10,8 @@ from .common import now, state
 
 STARTED_PIDS = []
 DEFAULTS = {"splash": True, "splash_seconds": 2.5,
-            "show_games_without_recipe": True, "check_updates_on_start": True}
+            "show_games_without_recipe": True, "check_updates_on_start": True,
+            "auto_install_ge": True, "cleanup_old_ge": True}
 
 
 def settings(data):

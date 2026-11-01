@@ -4,7 +4,7 @@
 downloads its `index.json`, validates every embedded TOML recipe/digest, and
 atomically activates that cache. It never invokes Git or updates at game launch.
 `DECKCOMPANION_RELEASE_API` or `DECKCOMPANION_INDEX_URL` override metadata sources.
-All downloads use HTTPS, a two-second socket timeout and a two-second wall deadline
+Engine/index downloads use HTTPS, a two-second socket timeout and a two-second wall deadline
 per request. An offline request retains the last validated index; no cache means
 bundled recipes and the current engine remain usable.
 
@@ -49,3 +49,44 @@ only apply writes Steam VDF files. See the [CLI lifecycle](cli.md).
 The builder never reads or modifies the sibling's `ui/` tree.
 
 Not verified on hardware. Tests use fake tarballs and mocked release responses.
+
+## GE-Proton builds
+
+`update` also installs every versioned GE-Proton pin from enabled recipes, then
+the newest stable release when `auto_install_ge=true` (default). Disabling that
+setting still installs enabled recipe pins. Launch never downloads runtimes: it
+keeps the installed-build fallback. The Updates tab lists wanted/installed builds,
+offers Install/retry and polls progress; Settings exposes both GE preferences.
+
+Metadata comes from the `GloriousEggroll/proton-ge-custom` GitHub releases API.
+Select the x86_64 archive, prefer its `digest: sha256:…`, and enforce any recipe
+SHA256 pin before activation. Older releases without the archive API digest may
+provide a matching `.sha512sum`; verify SHA512 as SHA512, additionally calculate
+SHA256, and compare the recipe SHA256 if present. A checksum file asset's own API
+digest is never used as the archive digest. Validated metadata is cached for
+offline retries. These checks trust upstream HTTPS metadata, not a signature.
+
+Runtime transfers have a separate 3,600-second wall budget, 30-second connect/read
+socket timeout, 2 GiB compressed cap, and 4 GiB extraction cap. Check free space
+for the archive, maximum expansion and 256 MiB margin before downloading.
+Interrupted `.part` files stay in `cache/ge/downloads/` for a Range retry. A server
+ignoring Range restarts the file; mismatched Content-Range, truncation and excess
+bytes fail. Full corrupt files are removed before retry. Extraction uses the same
+contained tar implementation as engine updates, stages beside compatibility tools
+and activates the complete directory atomically. Existing directories are preserved.
+
+UI-triggered update/install uses `systemd-run --user` with a 3,600-second service
+limit and a pinned engine/explicit data roots; closing the UI does not cancel the
+service. Missing/failing user systemd reports an actionable error. Direct CLI
+installs work without systemd. `proton.lock` excludes competing runtime jobs;
+short state operations and read-only polling remain available. Expired service
+receipts become retryable failures; bytes are never trusted without verification.
+
+`cleanup_old_ge=true` (default) retains enabled recipe pins, newest GE and external
+builds. Cleanup only removes recorded installs with matching ownership receipts
+and a complete unchanged file/link inventory, and waits while Steam runs. Unknown
+latest metadata or any install error skips cleanup. Disabling cleanup preserves
+old builds. Receipts live in `proton-installed.json` under the data root, separate
+from game settings; every downloaded build also carries `.deckcompanion-ge.json`.
+No umu-launcher code is imported or copied. Real downloads and service lifetime
+remain **not verified on hardware**.
