@@ -98,6 +98,14 @@ func run() -> void:
 	ui.status["pending"] = []
 	ui._update_status_chip()
 	check(ui.updates_info.get("available",[]).size() == 2 and ui.status_chip.text.contains("2 updates") and not ui.status_chip.disabled,"corner chip announces Decky plugin updates when nothing else waits")
+	# Apply lists what changes (owner: "I have no idea what changes were made").
+	var first_game: Dictionary = ui.games[0]
+	ui.status["pending"] = [{"appid":str(first_game.appid),"action":"enable"},{"appid":"2506537342","action":"remove_shortcut"},{"appid":"3748988868","action":"remove_shortcut"},{"action":"default_on"}]
+	ui._confirm()
+	await create_timer(0.2).timeout
+	var listed: String = ui.dialog.get_meta("list").text
+	check(ui.dialog.visible and listed.contains(str(first_game.name) + ": run through DeckCompanion") and listed.contains("Remove 2 old DeckCompanion shortcuts") and listed.contains("default for new games") and ui.dialog.get_meta("heading").text.begins_with("Apply 4 changes"),"Apply dialog names every waiting change")
+	ui.dialog.hide()
 	ui.status["pending"] = saved_pending
 	ui._update_status_chip()
 	await create_timer(0.4).timeout

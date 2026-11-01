@@ -32,7 +32,7 @@ var decky_pending_repeat := ""
 var launcher_backend: Node
 var launchers_data: Array = []
 var launcher_poll := 0.0
-const UI_VERSION := "0.4.9"
+const UI_VERSION := "0.4.10"
 # Design tokens (shared with the logo and Steam artwork palette).
 var INK: Color = Color("e7f1f4")
 var MUTED: Color = Color("8fa6b2")
@@ -385,6 +385,13 @@ func _build_shell() -> void:
 	dim.visible = false
 	add_child(dim)
 	dialog = _make_dialog("Apply changes and restart Steam?","Steam closes and restarts to apply your changes, and DeckCompanion closes with it.\nSave and quit any running game first.","Apply and restart","Keep editing")
+	var change_list := _label("",18,INK)
+	change_list.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	change_list.custom_minimum_size.x = 672
+	var apply_box: VBoxContainer = dialog.get_meta("box")
+	apply_box.add_child(change_list)
+	apply_box.move_child(change_list,1)
+	dialog.set_meta("list",change_list)
 	dialog.confirmed.connect(func(): _request("apply",["--restart-steam"]))
 	licenses = AcceptDialog.new()
 	licenses.title = "Licenses"
@@ -714,9 +721,44 @@ func _restore_modal_focus() -> void:
 
 func _confirm() -> void:
 	if backend.busy or status.get("pending",[]).is_empty(): return
+	var lines := _pending_lines()
+	var shown := lines.slice(0,8)
+	if lines.size() > shown.size(): shown.append("…and %d more" % (lines.size() - shown.size()))
+	dialog.get_meta("list").text = "\n".join(shown.map(func(l): return "•  " + l))
+	dialog.get_meta("heading").text = "Apply %d change%s and restart Steam?" % [status.pending.size(),"" if status.pending.size() == 1 else "s"]
 	modal_focus = get_viewport().gui_get_focus_owner()
 	_popup(dialog)
 	dialog.get_cancel_button().grab_focus()
+
+## Plain-words list of what Apply will change, one line per change (old
+## DeckCompanion shortcuts are grouped into one line).
+func _pending_lines() -> Array:
+	var names := {}
+	for game in games:
+		names[str(game.get("appid",""))] = game
+		if game.get("slug") != null: names[str(game.slug)] = game
+	var lines: Array = []
+	var old_shortcuts := 0
+	for item in status.get("pending",[]):
+		var game: Dictionary = names.get(str(item.get("appid",item.get("slug",""))),{})
+		var title := str(game.get("name","App " + str(item.get("appid",item.get("slug","")))))
+		var before := str(game.get("previous_mapping","")) if game.get("previous_mapping") != null else ""
+		match str(item.get("action","")):
+			"enable": lines.append("%s: run through DeckCompanion" % title)
+			"disable": lines.append("%s: back to %s" % [title,before if before != "" else "Steam's own setting"])
+			"restore": lines.append("%s: back to %s" % [title,before if before != "" else "its previous tool"])
+			"restore_default": lines.append("Steam's default tool: back to your previous choice")
+			"default_on": lines.append("Make DeckCompanion Steam's default for new games")
+			"default_off": lines.append("Stop using DeckCompanion as Steam's default")
+			"add": lines.append("Add %s to your Steam library" % title)
+			"remove": lines.append("Remove %s from your Steam library (files are kept)" % title)
+			"remove_shortcut":
+				if game.is_empty(): old_shortcuts += 1
+				else: lines.append("Remove the Steam shortcut for %s" % title)
+			_: lines.append("%s: %s" % [title,str(item.get("action","")).replace("_"," ")])
+	if old_shortcuts > 0:
+		lines.append("Remove %d old DeckCompanion shortcut%s left over from earlier installs" % [old_shortcuts,"" if old_shortcuts == 1 else "s"])
+	return lines
 
 func _request(command: String, args: Array = []) -> void:
 	failed_command = command
