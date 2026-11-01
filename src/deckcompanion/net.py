@@ -38,7 +38,7 @@ def fetch(url, target, budget=None, max_bytes=1024 * 1024 * 1024):
     proc = None
     try:
         proc = subprocess.Popen([sys.executable, "-m", "deckcompanion.net", url, name, str(max_bytes)],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=worker_env())
         STARTED_PIDS.append(proc.pid)
         try:
             proc.wait(timeout=budget.remaining())
@@ -73,8 +73,23 @@ def cached(paths, url, sha256, budget=None):
         partial.unlink(missing_ok=True)
 
 
+def worker_env():
+    """The worker must import this package even when the caller only extended sys.path."""
+    env = dict(os.environ)
+    root = str(Path(__file__).resolve().parents[1])
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (root, env.get("PYTHONPATH", "")) if p)
+    return env
+
+
+def headers(url):
+    # GitHub's REST API answers 415 to Accept: application/octet-stream on JSON endpoints.
+    api = url.startswith("https://api.github.com/") and "/releases/assets/" not in url
+    return {"User-Agent": "DeckCompanion/0.2",
+            "Accept": "application/vnd.github+json" if api else "application/octet-stream"}
+
+
 def worker(url, target, max_bytes):
-    request = urllib.request.Request(url, headers={"User-Agent": "DeckCompanion/0.2", "Accept": "application/octet-stream"})
+    request = urllib.request.Request(url, headers=headers(url))
     with urllib.request.urlopen(request, timeout=2) as response, open(target, "wb") as output:
         if not response.url.startswith("https://"):
             raise ValueError("Insecure redirect")

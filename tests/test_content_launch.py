@@ -1,6 +1,7 @@
 import enum
 import hashlib
 import io
+import os
 import json
 from pathlib import Path
 import subprocess
@@ -167,6 +168,16 @@ def test_http_deadline_kills_only_owned_worker(paths, monkeypatch):
     assert 0 < proc.waits[0] <= 2 and proc.waits[1] == 2
     assert not (paths.cache / "target").exists()
     assert not list(paths.cache.glob(".download-*"))
+
+
+def test_worker_headers_and_import_path(monkeypatch):
+    from deckcompanion import net
+    assert net.headers("https://api.github.com/repos/a/b/releases/latest")["Accept"] == "application/vnd.github+json"
+    assert net.headers("https://api.github.com/repos/a/b/releases/assets/1")["Accept"] == "application/octet-stream"
+    assert net.headers("https://github.com/a/b/releases/download/v1/x.zip")["Accept"] == "application/octet-stream"
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    root = str(Path(net.__file__).resolve().parents[1])
+    assert net.worker_env()["PYTHONPATH"].split(os.pathsep)[0] == root
 
 
 def test_launch_timeout_uses_installed_and_cached_mod(paths, tmp_path, monkeypatch):
