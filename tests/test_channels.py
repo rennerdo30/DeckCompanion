@@ -79,6 +79,8 @@ def test_update_content_without_an_engine_release(isolated, monkeypatch):
     assert active["launchers"] == candidate["launchers"]
     assert result["channels"]["content"]["version"] == candidate["content_version"]
     assert result["channels"]["content"]["state"] == "current"
+    entries = read_json(isolated.data / "updates.json", {}).get("entries", [])
+    assert [(e["module"], e["from"], e["to"]) for e in entries] == [("recipes", None, candidate["content_version"])]
     budgets = [budget for url, budget in calls if "?per_page=" in url or url == "https://example.org/content"][-2:]
     assert len(budgets) == 2 and budgets[0] is budgets[1]
     assert budgets[0].remaining() <= 2
@@ -200,6 +202,10 @@ def test_mod_updates_without_content_or_engine_release_and_launch_uses_cache(iso
     (prefix / "pfx").mkdir(parents=True)
     result = content.reconcile(isolated, "42", recipes.load(isolated, "42"), prefix, None, {}, net.Budget(), lambda s: None)
     assert result == {"mod": "v3"} and (prefix / "pfx/mod.zip").read_bytes() == b"new bytes"
+    entries = read_json(isolated.data / "updates.json", {}).get("entries", [])
+    assert [(e["module"], e["name"], e["from"], e["to"]) for e in entries] == [("mods", "Independent mod", None, "v3")]
+    content.reconcile(isolated, "42", recipes.load(isolated, "42"), prefix, None, {}, net.Budget(), lambda s: None)
+    assert read_json(isolated.data / "updates.json")["entries"] == entries
     assert calls.count("https://api.github.com/repos/example/mod/releases/latest") == 1
 
 
@@ -277,6 +283,9 @@ def test_umu_tracks_upstream_pin_and_cache_only_launch(paths, monkeypatch):
     umu_network(monkeypatch, "10.0")
     assert umu.install(paths)["version"] == "10.0"
     assert (paths.data / "umu/9.0/umu-run").is_file()
+    entries = read_json(paths.data / "updates.json", {}).get("entries", [])
+    assert [(e["module"], e["from"], e["to"]) for e in entries] == [
+        ("umu", None, "9.1"), ("umu", "9.1", "9.0"), ("umu", "9.0", "10.0")]
 
 
 @pytest.mark.parametrize("failure", ["corrupt", "missing_digest", "offline"])

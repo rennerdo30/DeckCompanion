@@ -17,6 +17,8 @@ contract too. `--help` is the human help exception. No progress messages on stdo
 ```sh
 deckcompanion decky status --json
 deckcompanion decky install --json
+deckcompanion decky install --password-file F --json
+deckcompanion decky update-plugins --password-file F --json
 deckcompanion decky panel --json
 deckcompanion decky panel --appid 2300320 --json
 deckcompanion decky plugin-status --json
@@ -26,7 +28,8 @@ deckcompanion decky plugin-install --json
 `decky status` returns `installed` (the `~/homebrew/services/PluginLoader` file),
 `version` from `~/homebrew/services/.loader.version` (nullable), `service` from
 unprivileged `systemctl is-active plugin_loader` (5-second timeout; `unknown` if
-unavailable), and `latest: {version, source, stale, checked_at?}`. Latest stable
+unavailable), `password_set` (boolean or null), `plugins` (below), and
+`latest: {version, source, stale, checked_at?}`. Latest stable
 Loader metadata comes from GitHub `SteamDeckHomebrew/decky-loader/releases/latest`,
 cached for six hours. Offline/rate-limited lookup keeps stale cached metadata;
 without a cache the latest version is null, never guessed from a bundled pin.
@@ -38,16 +41,67 @@ The command is the official fast installer:
 curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh | sh
 ```
 
-Decky installs a system service and its installer needs root. DeckCompanion never
-collects, stores or forwards passwords. In a Linux Desktop graphical session
+Decky installs a system service and its installer needs root. Without a password
+file, in a Linux Desktop graphical session
 (DISPLAY or WAYLAND_DISPLAY, outside Game Mode), with Konsole and systemd-run
 available, it submits a separate user unit running Konsole and that command.
 The official installer prompts for sudo in its own terminal. Submission times out
 after five seconds; the detached terminal has a 30-minute maximum lifetime.
 `launched: true` confirms scheduling only, not successful installation. In Game Mode,
 headless sessions, Windows or failed handoffs, run the command manually in Desktop
-Konsole. No automatic session switch, service restart or sudo wrapper is provided.
+Konsole. This terminal handoff does not switch sessions or restart Steam itself.
 Rerunning the official installer supplies the supported Loader update/reinstall path.
+
+`decky install --password-file F` runs the official installer inside the app on
+SteamOS/Linux. The caller creates a private password file (prefer a mode-0700
+directory in `XDG_RUNTIME_DIR`). The engine reads it once and deletes it immediately,
+including rejected/unsupported attempts; it checks sudo using `sudo -S -k -p "" true`.
+The password is passed only on stdin, never argv, logs or durable state. After a
+successful Loader install it updates installed plugins **before** restarting Steam.
+The existing result gains `plugins_updated` (successful plugin names) and
+`plugins_failed` (`name` and fixed error code), even when some plugins fail:
+
+```json
+{"installed":true,"version":"v3.3.1","steam_restarting":true,"log":"/path/to/decky-install.log","plugins_updated":["SteamGridDB"],"plugins_failed":[{"name":"ProtonDB Badges","error":"checksum_mismatch"}]}
+```
+
+`decky status.plugins` matches installed `plugin.json` names, independently of the
+directory name, against the [Decky store](https://plugins.deckbrew.xyz/plugins):
+
+```json
+{"plugins":[{"dir":"protondb-decky","name":"ProtonDB Badges","installed":"1.2.0","latest":"1.3.4","update_available":true}]}
+```
+
+`dir`/`name` are strings, `installed`/`latest` are strings or null, and
+`update_available` is boolean. Unknown plugins stay listed with null latest and
+false availability. Store metadata has a separate six-hour cache and stale offline
+fallback; unavailable or malformed metadata never fails status. DeckCompanion's
+own plugin uses its independent `decky-v*` releases, including when installed in
+a differently named directory; it never updates from the store.
+
+Store ZIPs use `https://cdn.tzatzikiweeb.moe/file/steam-deck-homebrew/versions/<hash>.zip`.
+The store hash is the ZIP's SHA256 (verified against live ProtonDB Badges 1.3.4
+and SteamGridDB 1.8.1 on 2026-11-02 JST). Downloads are bounded to 128 MiB/60 seconds;
+extraction to 256 MiB/10,000 entries. Traversal, absolute paths, backslashes,
+duplicate entries, symlinks and special files are rejected. An isolated root
+helper copies the archive into private staging and rechecks its SHA256 and metadata,
+then atomically exchanges directories on Linux. New files are root-owned; the
+previous directory remains under `plugins/.dc-plugin-*/unpack/` for recovery.
+Root replacement has its own 110-second timeout. A failed plugin leaves its old
+directory intact and does not fail a successful Loader install.
+
+`decky update-plugins --password-file F` applies only those plugin updates, with
+the same password handling. It does not install/update the Loader or install new
+plugins. Steam restarts only when at least one plugin changed. Its complete result:
+
+```json
+{"plugins_updated":["SteamGridDB"],"plugins_failed":[{"name":"ProtonDB Badges","error":"checksum_mismatch"}],"steam_restarting":true}
+```
+
+Per-plugin failures are reported in `plugins_failed`, including on exit 0; callers
+must inspect that list. Typical codes: `checksum_mismatch`, `invalid_plugin`,
+`plugin_install_failed`, `plugin_timeout`. A rejected sudo password fails the
+command through the usual error contract. No plugin update runs automatically.
 
 `decky panel` returns `{game: GAME|null, selection, settings, proton, shortcut_appid}`
 without network. It prefers the optional current Steam appid, otherwise a running
@@ -84,12 +138,51 @@ retain `.DeckCompanion-previous-<timestamp>`, and roll back on activation/receip
 failure. Bytecode caches do not count as edits. `changed` distinguishes update/no-op;
 reload plugins in Decky after success. Receipt: `decky-plugin-installed.json` in the
 engine data directory. Engine versions, recipes and the current pointer are untouched.
-For root-owned directories or manual plugin updates, use Decky's developer
-**Install Plugin from ZIP** action. Manual installations remain Decky-owned.
+Root-owned installed plugins can instead use the explicit `decky update-plugins`
+command above. Decky's developer **Install Plugin from ZIP** remains an alternative.
 
 Build the plugin separately under `decky-v<version>`; it never enters an engine
 tarball or requires an engine version bump. See `decky-plugin/README.md` for builds,
 verified dependency versions and open hardware checks.
+
+## Update notifications
+
+```sh
+deckcompanion updates --json
+deckcompanion updates --seen --json
+```
+
+The complete response is:
+
+```json
+{
+  "changed": [{"module":"umu","name":"umu-launcher","from":"1.3.0","to":"1.3.1","at":"2026-11-01T16:00:00+00:00"}],
+  "available": [{"module":"decky-plugins","name":"ProtonDB Badges","installed":"1.2.0","latest":"1.3.4"}]
+}
+```
+
+`changed` entries have exactly `module`, `name`, `from`, `to`, `at`. `module` is
+`engine|recipes|mods|umu|ge-proton|decky-plugin`; `name`, `to` and `at` are strings,
+`from` is a string or null for a first install, and `at` is an ISO-8601 UTC timestamp.
+These describe successful activations/installs, not metadata discovery or failed
+downloads. Content-channel activation is `recipes` (recipes plus launcher catalog);
+mods are recorded after files and their manifest commit, not when a release resolves.
+GE builds install side by side, so each new build has null `from`. The independent
+DeckCompanion plugin uses `decky-plugin`. No event is added for a no-op.
+
+Notification state is `<data>/updates.json`, with a separate writer lock so settings
+and launch-state writes cannot overwrite it. It retains at most 50 entries including
+seen history. Plain reads repeat unseen entries. `--seen` returns and acknowledges
+the currently unseen entries atomically; subsequent reads omit them. Newly arriving
+entries remain unseen. Available updates are not acknowledged by `--seen`.
+
+`available` entries have exactly `module`, `name`, `installed`, `latest`. `module`
+is `decky-loader|decky-plugins|deckcompanion-plugin`; `name` and `latest` are strings,
+`installed` is a string or null. Missing/unknown cache metadata produces no entry.
+This command performs **no network or service queries**, reading only existing
+metadata and installed markers. The background `update` worker refreshes Loader
+and installed-plugin metadata without updating Decky. `decky status` and
+`decky plugin-status` can also refresh their respective caches.
 
 ## Non-Steam Windows games
 

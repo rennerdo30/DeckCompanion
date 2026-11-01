@@ -8,7 +8,7 @@ import zipfile
 import pytest
 import vdf
 from deckcompanion import cli, net, steam
-from deckcompanion.common import Error, atomic, save_state, write_json
+from deckcompanion.common import Error, atomic, read_json, save_state, write_json
 
 
 @pytest.fixture
@@ -278,6 +278,9 @@ def test_plugin_update_retains_backup_and_rejects_bad_sha(paths, decky, tmp_path
     assert result["version"] == "0.2.0" and result["changed"]
     assert (Path(result["backup"]) / "main.py").read_text() == "payload"
     assert not (paths.data / "current").exists()
+    entries = read_json(paths.data / "updates.json", {}).get("entries", [])
+    assert [(e["module"], e["from"], e["to"]) for e in entries] == [
+        ("decky-plugin", None, "0.1.0"), ("decky-plugin", "0.1.0", "0.2.0")]
 
 
 def test_plugin_activation_failure_restores_previous_install(paths, decky, tmp_path, monkeypatch):

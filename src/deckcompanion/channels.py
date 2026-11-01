@@ -83,6 +83,8 @@ def refresh(paths):
             if previous.get("content_version") and recipes.version_key(previous["content_version"]) > recipes.version_key(candidate["content_version"]):
                 raise Error("invalid_index", "Refusing an older content version")
             write_json(paths.cache / "index.json", recipes.merge_index(previous, candidate))
+        from .updates import record
+        record(paths, "recipes", "Recipes and catalog", previous.get("content_version"), candidate["content_version"])
         status = {"state": "current", "updated": True}
     except FAILURES as exc:
         status.update(state=getattr(exc, "code", "invalid_index"), message=str(exc))

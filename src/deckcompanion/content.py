@@ -162,6 +162,9 @@ def reconcile(paths, appid, recipe, prefix, game, preferences, budget, log, stat
                     else:
                         atomic(path, payload)
                 raise
+            if mod:
+                from .updates import record
+                record(paths, "mods", mod.get("name", ident), previous.get("version") if previous else None, mod["version"])
         except (Error, OSError, ValueError, zipfile.BadZipFile) as exc:
             statuses[ident] = {"code": getattr(exc, "code", "content_error"),
                                "message": failure_message(exc)}

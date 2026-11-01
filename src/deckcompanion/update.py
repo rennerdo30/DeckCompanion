@@ -75,6 +75,7 @@ def switch(paths, version):
 
 def install_engine(paths, source, version, sha256):
     version = component(version)
+    old = current(paths)
     if net.digest(source) != sha256:
         raise Error("checksum_mismatch", "Engine archive checksum mismatch")
     versions = paths.data / "versions"
@@ -84,6 +85,8 @@ def install_engine(paths, source, version, sha256):
         if receipt.get("sha256") != sha256:
             raise Error("version_conflict", "Existing engine version differs; preserving it")
         switch(paths, version)
+        from .updates import record
+        record(paths, "engine", "DeckCompanion", old, version)
         return
     versions.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".install-", dir=versions))
@@ -96,6 +99,8 @@ def install_engine(paths, source, version, sha256):
         write_json(staging / ".release.json", {"version": version, "sha256": sha256, "files": hashes})
         os.replace(staging, target)
         switch(paths, version)
+        from .updates import record
+        record(paths, "engine", "DeckCompanion", old, version)
     finally:
         if staging.exists():
             shutil.rmtree(staging)
@@ -160,6 +165,10 @@ def update(paths):
     content_status = channels.refresh(paths)
     mod_status = channels.resolve_mods(paths)
     from . import proton, umu
+    # Decky is explicitly user-updated; background work only refreshes availability.
+    from . import decky
+    decky.latest(paths)
+    decky.plugins_status(paths)
     try:
         runtime = umu.install(paths)
     except Exception as exc:

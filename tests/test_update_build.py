@@ -43,6 +43,9 @@ def test_atomic_switch_keeps_previous_and_rollback(paths):
     assert update.rollback(paths) == {"version": "0.1", "rolled_back": True}
     assert (paths.data / "previous").read_text().strip() == "0.2"
     assert not list((paths.data / "versions").glob(".install-*"))
+    entries = read_json(paths.data / "updates.json", {}).get("entries", [])
+    assert [(e["module"], e["from"], e["to"]) for e in entries] == [
+        ("engine", __version__, "0.1"), ("engine", "0.1", "0.2")]
 
 
 def test_invalid_archive_or_digest_never_switches(paths):
@@ -131,6 +134,8 @@ def test_release_api_mock_and_initial_offline(paths, monkeypatch):
         write_json(target, [{"tag_name": "v0.3.0", "assets": [{"name": "index.json", "browser_download_url": "https://example.org/index"}]}] if len(urls) == 1 else candidate)
     monkeypatch.setattr(net, "fetch", fetch)
     assert update.update(paths)["index"]["updated"] is True
+    entries = read_json(paths.data / "updates.json", {}).get("entries", [])
+    assert any(e["module"] == "engine" and e["to"] == "0.3.0" for e in entries)
     from deckcompanion.proton import API
     assert urls[:2] == [update.RELEASE_API + "?per_page=100&page=1", "https://example.org/index"]
     assert any("?per_page=100&page=1" in url for url in urls)
