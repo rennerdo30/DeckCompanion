@@ -290,6 +290,9 @@ def test_umu_exec_failure_logs_and_marks_handoff_failed(paths, ns, runtime, tmp_
 
 
 def test_update_installs_umu_even_offline_and_reports_failure(paths, runtime, monkeypatch):
+    from deckcompanion import decky as decky_module  # Decky availability is checked online; not under test here.
+    monkeypatch.setattr(decky_module, "latest", lambda paths: {"version": None, "source": "unavailable", "stale": True})
+    monkeypatch.setattr(decky_module, "plugins_status", lambda paths: [])
     calls = []
     monkeypatch.setattr(update, "json_url", lambda *a: (_ for _ in ()).throw(Error("offline", "Offline")))
     # update() also syncs GE-Proton builds (DC-13); that path has its own tests.

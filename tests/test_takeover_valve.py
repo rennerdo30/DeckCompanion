@@ -213,6 +213,9 @@ def test_uninstall_restores_takeover_without_reenabling(paths, library):
 
 
 def test_install_and_update_queue_new_games_without_steam_writes(paths, library, tmp_path, monkeypatch):
+    from deckcompanion import decky as decky_module  # Decky availability is checked online; not under test here.
+    monkeypatch.setattr(decky_module, "latest", lambda paths: {"version": None, "source": "unavailable", "stale": True})
+    monkeypatch.setattr(decky_module, "plugins_status", lambda paths: [])
     # Minimal extracted installer source, all payload owned by this fixture.
     root = tmp_path / "release"
     for name in ("src/deckcompanion/__main__.py", "vdf/__init__.py"):

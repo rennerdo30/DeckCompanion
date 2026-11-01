@@ -167,8 +167,11 @@ def update(paths):
     from . import proton, umu
     # Decky is explicitly user-updated; background work only refreshes availability.
     from . import decky
-    decky.latest(paths)
-    decky.plugins_status(paths)
+    try:
+        decky.latest(paths)
+        decky.plugins_status(paths)
+    except (Error, OSError, ValueError):
+        pass  # Availability only; never blocks the other channels.
     try:
         runtime = umu.install(paths)
     except Exception as exc:
