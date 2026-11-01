@@ -11,7 +11,7 @@ TOOL_IDS = {"228980", "1070560", "1391110", "1628350", "4183110", "1493710", "21
 
 
 def is_game(ident, metadata, entry=None):
-    app = metadata["apps"].get(ident, {})
+    app = metadata.get("apps", {}).get(ident, {})
     tool_ids = {str(v.get("appid")) for v in metadata.get("compat_tools", {}).values() if isinstance(v, dict)}
     if ident in TOOL_IDS | tool_ids:
         return False
@@ -23,7 +23,7 @@ def is_game(ident, metadata, entry=None):
 
 
 def windows(entry, metadata, mapping=None):
-    app = metadata["apps"].get(entry["appid"], {})
+    app = metadata.get("apps", {}).get(entry["appid"], {})
     if not is_game(entry["appid"], metadata, entry):
         return False
     manifest = steam.read_vdf(Path(entry["library"]) /

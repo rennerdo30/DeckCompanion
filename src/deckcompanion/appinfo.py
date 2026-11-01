@@ -148,7 +148,7 @@ def load(paths, log=lambda message: None):
 
 
 def recommendation(metadata, ident):
-    profile = metadata["apps"].get(str(ident), {}).get("recommended_runtime")
-    override = metadata["app_mappings"].get(str(ident), {})
+    profile = metadata.get("apps", {}).get(str(ident), {}).get("recommended_runtime")
+    override = metadata.get("app_mappings", {}).get(str(ident), {})
     value = profile or (override.get("tool") if isinstance(override, dict) else None)
     return value if isinstance(value, str) else None
