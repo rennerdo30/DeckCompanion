@@ -63,7 +63,7 @@ def parser():
     runtime = commands.add_parser("umu")
     runtime.add_argument("action", choices=("install",))
     runtime.add_argument("--json", action="store_true")
-    for name in ("games", "game", "game-option", "enable", "disable", "mod", "default", "apply", "status", "update", "rollback", "settings"):
+    for name in ("games", "game", "game-option", "enable", "disable", "mod", "default", "restore-all", "apply", "status", "update", "rollback", "settings"):
         sub = commands.add_parser(name)
         sub.add_argument("--json", action="store_true")
         if name in ("game", "game-option", "enable", "disable", "mod"):
@@ -126,6 +126,10 @@ def execute(args, paths):
         from . import proton
         return (proton.schedule if args.detach else proton.run)(paths, "update")
     data = state(paths)
+    if name == "restore-all":
+        result = takeover.restore_all(paths, data)
+        save_state(paths, data)
+        return result
     if name in ("add-game", "remove-game", "umu"):
         from . import nonsteam, umu
         if name == "umu":
@@ -174,6 +178,8 @@ def execute(args, paths):
         discovery = takeover.discover(paths)
         identifiers = set(discovery[0]) | {i for i in recipes.ids(paths) if i.isdigit()} | set(data["games"])
         metadata, available = appinfo.load(paths), steam.proton(paths)
+        installed = steam.installed(paths)
+        identifiers = {i for i in identifiers if takeover.is_game(i, metadata, installed.get(i))}
         from . import nonsteam
         registered_ids = {g["appid"] for g in data.get("non_steam", {}).values()}
         return {"games": [game(paths, ident, discovery, metadata, available) for ident in sorted(identifiers - registered_ids, key=int)] +
@@ -244,11 +250,13 @@ def execute(args, paths):
         pending += [{"slug": g["slug"], "action": g["pending"]} for g in data.get("non_steam", {}).values() if g.get("pending")]
         if data.get("default_pending"):
             pending.append({"action": data["default_pending"]})
+        pending += takeover.restore_pending(data)
         return {"version": __version__, "install_path": str(paths.data), "steam_running": steam.running(),
                 "default_tool": steam.mappings(steam.read_vdf(steam.mapping_path(paths))).get("0", {}).get("name") == "DeckCompanion",
                 "pending": pending,
                 "takeover_all": data.get("settings", {}).get("takeover_all", True),
                 "takeover_counts": takeover.counts(data, eligible),
+                "takeover_snapshot": takeover.snapshot_status(data),
                 "proton": steam.proton(paths),
                 "last_apply": read_json(paths.data / "logs/apply-last.json")}
     raise Error("unknown_command", name)

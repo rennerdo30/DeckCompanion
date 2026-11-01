@@ -303,7 +303,7 @@ def differs(path, payload):
 
 
 def has_pending(data):
-    return bool(data.get("default_pending") or data.get("shortcut_pending") or
+    return bool(data.get("restore_pending") or data.get("default_pending") or data.get("shortcut_pending") or
                 any(g.get("pending") for g in data.get("non_steam", {}).values()) or
                 any(g.get("pending") for g in data["games"].values()))
 
@@ -321,6 +321,9 @@ def mapping_matches(entry):
 def prune_pending(paths, data):
     """Drop writes whose managed values already match Steam's current disk state."""
     target = mappings(read_vdf(mapping_path(paths)))
+    from . import takeover
+    if data.get("default_pending") == "default_on":
+        takeover.capture(data, "0", target)
     if data.get("default_pending") == "default_on" and mapping_matches(target.get("0")):
         data["default_pending"] = None
     for ident, game in data["games"].items():
@@ -394,6 +397,7 @@ def prepare_apply(paths):
     pending = data.get("default_pending")
     if pending:
         if pending == "default_on":
+            takeover.capture(data, "0", target)
             if target.get("0", {}).get("name") != "DeckCompanion":
                 data["previous_default_mapping"] = target.get("0")
             target["0"] = {"name": "DeckCompanion", "config": "", "priority": "250"}
@@ -410,6 +414,8 @@ def prepare_apply(paths):
         if not pending:
             continue
         if pending == "enable":
+            takeover.capture(data, "0", target)
+            takeover.capture(data, ident, target)
             if not game.get("enabled") and not game.get("takeover_snapshot"):
                 game["previous_mapping"] = target.get(ident)
             target[ident] = {"name": "DeckCompanion", "config": "", "priority": "250"}
@@ -425,6 +431,19 @@ def prepare_apply(paths):
             game["takeover_snapshot"] = False
         game.update(enabled=pending == "enable", pending=None)
         changes.append({"appid": ident, "action": pending})
+    for change in takeover.restore_pending(data):
+        ident = change.get("appid", "0")
+        previous = data["takeover_snapshot"]["entries"][ident]
+        if previous is None:
+            target.pop(ident, None)
+        else:
+            target[ident] = previous
+        if ident != "0":
+            cleanup.append(paths.config / "localfixes" / f"{ident}.py")
+            data["games"].setdefault(ident, {}).update(enabled=False, pending=None,
+                takeover_managed=False, takeover_snapshot=False)
+        changes.append(change)
+    data["restore_pending"] = []
     writes = []
     if changes:
         writes.append((mapping_path(paths), vdf.dumps(doc, pretty=True).encode()))
@@ -511,8 +530,12 @@ def commit_apply(paths, plan, closed_window=False):
 def verify_apply(paths, plan):
     """Steam may reserialize its files after starting; compare our managed values only."""
     target = mappings(read_vdf(mapping_path(paths)))
+    restored = {c.get("appid", "0") for c in plan["changes"] if c["action"] in ("restore", "restore_default")}
     for ident, expected in plan["mappings"].items():
         actual = target.get(ident)
+        if ident in restored:
+            if actual != expected: return False
+            continue
         if expected is None:
             if actual is not None: return False
         else:

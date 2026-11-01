@@ -126,7 +126,7 @@ def test_cli_shapes_and_errors(paths, monkeypatch, capsys):
     assert detail["log_tail"][0] == "30"
     assert "notes" in detail
     assert set(invoke(capsys, "status")[1]) == {"version", "install_path", "steam_running", "default_tool", "pending", "proton", "last_apply",
-                                               "takeover_all", "takeover_counts"}
+                                               "takeover_all", "takeover_counts", "takeover_snapshot"}
     assert invoke(capsys, "status")[1]["last_apply"] is None
     code, error = invoke(capsys, "enable", "../bad")
     assert code == 1 and error["error"]["code"] == "invalid_appid"

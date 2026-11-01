@@ -118,10 +118,20 @@ def uninstall(paths):
     for item in data["games"].values():
         if item.get("pending") == "enable":
             item["pending"] = None
+    from . import takeover
+    # Keep the legacy conservative cleanup for mappings without a snapshot, then use
+    # the same exact restoration transaction as restore-all for every recorded entry.
+    legacy = {i: g.get("pending") for i, g in data["games"].items() if g.get("pending")}
+    takeover.restore_all(paths, data)
+    entries = data.get("takeover_snapshot", {}).get("entries", {})
+    for ident, pending in legacy.items():
+        if ident not in entries:
+            data["games"][ident]["pending"] = pending
     data["shortcut_pending"] = False
     for game in data.get("non_steam", {}).values():
         game.update(removed=True, pending="remove")
-    data["default_pending"] = "default_off"
+    if "0" not in entries:
+        data["default_pending"] = "default_off"
     save_state(paths, data)
     steam.apply(paths)
     for config in (paths.steam / "userdata").glob("*/config"):

@@ -7,7 +7,7 @@ from . import content, localfix, net, recipes, splash, steam
 from .common import Error, atomic, app_id, locked, now, read_json, save_state, state
 
 
-def match_proton(available, name, aliases=None):
+def match_proton(available, name, aliases=None, valve=False):
     if name not in ("proton-stable", "proton-experimental", "proton_experimental"):
         name = (aliases or {}).get(name, name)
     exact = next((p for p in available if p["name"].lower() == name.lower()), None)
@@ -18,6 +18,17 @@ def match_proton(available, name, aliases=None):
     numbered = [p for p in available if re.fullmatch(r"Proton[ -]\d+(?:[.-]\d+)*", p["name"])]
     if name == "proton-stable":
         return next(iter(numbered), None)  # Already sorted by numeric version.
+    # Deck profiles use beta and release-candidate channel names, not installed
+    # directory names. Only Valve recommendations get the channel fallback;
+    # an unavailable user override retains its existing newest-build behavior.
+    requested = re.fullmatch(r"proton-(\d+)\.(\d+)(?:-(?:beta|\d+(?:RC)?))?", name, re.I)
+    if valve and requested:
+        wanted = tuple(map(int, requested.groups()))
+        candidates = [(tuple(int(n) for n in re.findall(r"\d+", p["name"])), p) for p in numbered]
+        candidates = [(v, p) for v, p in candidates if v[0] == wanted[0] and (v + (0,))[:2] >= wanted]
+        if candidates:
+            return min(candidates, key=lambda pair: pair[0])[1]
+        return next((p for p in available if p["name"] == "Proton - Experimental"), None)
     if re.fullmatch(r"proton[_ -]\d+(?:[._-]\d+)*", name, re.I):
         def version(value):
             return tuple(int(n) for n in re.findall(r"\d+", value))
@@ -41,8 +52,9 @@ def select_proton(available, recipe, override=None, valve=None, aliases=None, lo
             return selected, "user_override"
         log(f"User Proton override unavailable: {override}; using installed fallback")
     elif not recipe and valve:
-        selected = match_proton(available, valve, aliases)
+        selected = match_proton(available, valve, aliases, valve=True)
         if selected:
+            log(f"Valve runtime mapping: {valve} -> {selected['name']}")
             return selected, "valve_recommended"
         log(f"Valve recommendation unavailable: {valve}; using newest installed Proton")
     fallback = next((p for p in available if p["name"].startswith("GE-Proton")), available[0]) if recipe else available[0]

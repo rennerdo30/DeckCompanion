@@ -73,7 +73,10 @@ vendored or included in the MIT release tarball. **Not verified on hardware.**
 - `default --on|--off --json` -> the same object as `status`. Queues setting or
   restoring global `CompatToolMapping` key `"0"`; Steam files stay unchanged until
   `apply`. Install queues `default_on` automatically. The previous complete entry
-  is saved at apply time and restored by off/uninstall only while ours is selected.
+  is saved at apply time and restored by off only while ours is selected.
+- `restore-all --json` -> `{"restoring":2,"pending":[{"appid":"4634560","action":"restore"},{"action":"restore_default"}]}`.
+  Queues exact first-takeover mapping restoration, turns `takeover_all` off and
+  clears exclusions. Apply once with `apply --restart-steam --json`; see below.
 - `mod APPID MOD_ID --on|--off --json` -> GAME plus
   `"mod_result":{"changed_now":true,"message":"Installed v0.7.0"}`.
   Saves preference and attempts to install, adopt, update or remove content immediately.
@@ -88,7 +91,7 @@ vendored or included in the MIT release tarball. **Not verified on hardware.**
   Writes recheck Steam and back up originals. Never kill detected Steam processes.
   An empty queue returns `{"applied":[],"steam_restarted":false}` without scheduling
   a helper or restarting Steam, including with `--restart-steam`.
-- `status --json` -> `{"version":"0.3.4","install_path":"/home/deck/.local/share/deckcompanion","steam_running":false,"default_tool":false,"pending":[],"proton":[{"name":"GE-Proton11-11","path":"..."}],"last_apply":null}`.
+- `status --json` -> `{"version":"0.4.2","install_path":"/home/deck/.local/share/deckcompanion","steam_running":false,"default_tool":false,"pending":[],"takeover_all":true,"takeover_counts":{"eligible":0,"on":0,"excluded":0,"applied":0,"pending":0},"takeover_snapshot":null,"proton":[{"name":"GE-Proton11-11","path":"..."}],"last_apply":null}`.
   `default_tool` reflects the current on-disk global mapping, even while a change
   is queued. `pending` retains game entries and adds `{"action":"default_on"}`
   or `{"action":"default_off"}` without an appid for a queued global change.
@@ -172,14 +175,22 @@ backups, semantic verification and one retry; use `status.pending` and
 by `default --on|--off`; takeover-off restores per-game entries only.
 
 Steam titles must have a library `appmanifest_*.acf`. Classification skips
-uninstalled manifests (`StateFlags & 1`) and appinfo types other than game/application.
-Explicit manifest `UserConfig/platform_override_dest` (or manifest `oslist`) wins.
-Otherwise, match `InstalledDepots` against appinfo depot `config/oslist`: Linux
-depots mean native, Windows depots mean Windows. If depot evidence is absent, use
-`common/oslist`, then the full depot OS list; include Windows-only entries, skip
-Linux-capable or unknown entries. Thus a cross-platform game with an installed
-Windows depot is included, while its installed Linux build is skipped. Missing or
-unreadable appinfo does not turn unknown games into Windows games.
+uninstalled manifests (`StateFlags & 1`). GAMES and takeover exclude appinfo types
+other than game/application/demo (including Tool, Config, Driver and DLC), known
+Steam runtime/redistributable appids and Steam Play compatibility-tool appids.
+Without appinfo, recognizable Steam Linux Runtime, Proton version/Hotfix/Experimental
+and Steamworks redistributable names are also excluded. Saved state/recipes do not
+bring filtered tools back into GAMES. Previously managed tools are restored.
+
+A Valve recommendation of `native` or a macOS-only app means native (`takeover:"n/a"`). Otherwise,
+any `proton*` recommendation or nonempty per-app compatibility-tool mapping means
+Windows-eligible, even if installed depot metadata says Linux. Without either
+choice, use explicit manifest `UserConfig/platform_override_dest` (or manifest
+`oslist`), then appinfo `common/oslist`: include Windows without Linux; skip Linux
+(including Windows+Linux), macOS-only and unknown entries. In particular, a
+Windows+Linux title without a Proton choice keeps its native build. Unknown/no
+appinfo without a manifest OS choice is eligible only with a Proton recommendation
+or compatibility mapping; depot/executable guesses alone do not opt it in.
 Existing shortcuts in every `userdata/*/config/shortcuts.vdf` are eligible only
 when their quoted/unquoted `Exe` ends in `.exe` (case insensitive). Their unsigned
 32-bit appid is used. Native shortcuts and the UI/umu native wrappers are excluded;
@@ -189,11 +200,51 @@ with `kind:"shortcut"`; registered umu games retain `kind:"non_steam"`.
 Every eligible game gets `{"name":"DeckCompanion","config":"","priority":"250"}`,
 including games with an existing per-game tool. State snapshots the complete previous
 entry before queueing the first write; repeated apply/install/update retains it.
-Global off, exclusion, removal of the installation/shortcut, and uninstall restore
+Global off, exclusion and removal of the installation/shortcut restore
 that exact entry (including extra fields), or remove it if none existed. As with
 manual disable, a later foreign mapping is preserved during restoration. State,
 cache and backups remain recovery data. Uninstall suppresses future takeover until
-the next install.
+the next install. Uninstall uses the first-snapshot restore path described below.
+
+### Restore all previous Steam settings
+
+State `takeover_snapshot` records `taken_at` (UTC ISO8601), `entries` (appid to
+complete original VDF entry, or null for absence), and `default_managed` (whether
+DeckCompanion affected global key `"0"`). First takeover captures the global state
+as well as every affected game/Windows shortcut. Later additions extend `entries`;
+existing entries and the timestamp are never overwritten, including after
+exclusion/reinclude or another takeover. Applying a global default also snapshots
+it before writing. Known originals from 0.4.2's `previous_mapping` and
+`previous_default_mapping` are migrated on the next mutation; migration timestamps
+record the migration time. An original already lost before this feature cannot be
+reconstructed; an existing DeckCompanion entry with no saved original is retained
+as the observed state rather than inventing an absent entry.
+
+`restore-all --json` returns exactly these top-level fields, for example:
+
+```json
+{"restoring":3,"pending":[{"appid":"3558600","action":"restore"},{"appid":"4634560","action":"restore"},{"action":"restore_default"}]}
+```
+
+`restoring` counts changed snapshot entries, including the global default when
+affected. `pending` lists games/shortcuts in numeric appid order, then the global
+default without an appid. The same entries appear in `status.pending` and
+`apply.applied` (or the detached receipt's `applied`). Queueing never writes Steam.
+It disables `settings.takeover_all`, clears every per-game exclusion, cancels pending
+mapping enables/disables/default changes and queues exact snapshot values. It
+preserves other settings, mods, non-Steam registrations, and unrelated mappings.
+Unlike ordinary per-game off, this explicit restore writes the saved original
+even if the current entry was subsequently edited. Absent originals remove the
+mapping; complete originals restore all fields, including nested/custom fields.
+Global `"0"` is restored only if DeckCompanion affected it.
+
+Run `apply --restart-steam --json` for the existing single detached transaction
+(one restart normally; the existing verification retry may restart once more).
+The queue and immutable snapshot survive failures/retries. Repeating restore-all
+before apply returns the same pending entries; after restoration it returns
+`{"restoring":0,"pending":[]}` and apply needs no restart. The snapshot is retained
+as recovery data. Uninstall uses this same queue/apply path while retaining its
+existing closed-Steam requirement and file/shortcut cleanup.
 
 GAME and each GAMES row add these exact fields:
 
@@ -212,13 +263,16 @@ or null, even when an override or recipe wins. No installed runtime means `proto
 STATUS adds these exact fields (example counts):
 
 ```json
-{"takeover_all":true,"takeover_counts":{"eligible":4,"on":3,"excluded":1,"applied":2,"pending":1}}
+{"takeover_all":true,"takeover_counts":{"eligible":4,"on":3,"excluded":1,"applied":2,"pending":1},"takeover_snapshot":{"taken_at":"2026-11-01T13:00:00+00:00","games":4}}
 ```
 
 `eligible` counts installed Windows titles/shortcuts; `on`/`excluded` count wanted
 states. `applied` counts enabled takeover-owned entries (including pending restores);
 `pending` counts takeover-owned queued enables/restores. Discovery itself is read-only;
 pending counts reflect the persisted queue after a mutating command.
+`takeover_snapshot` is null before a snapshot exists; otherwise it contains exactly
+`taken_at` and `games`. `games` counts snapshotted game/shortcut appids, excluding
+global `"0"`, and remains available after restoration.
 
 Appinfo is read-only and streamed by sized record, supporting magic `0x07564428`
 and `0x07564429` (the latter uses the trailing key string table). Unknown binary
@@ -242,7 +296,14 @@ GE/newest fallback and does not use Valve metadata. Reasons are `pinned`,
 `user_override`, `valve_recommended`, `recipe_fallback`, or `newest`.
 `proton-experimental` selects `Proton - Experimental`; `proton-stable` selects the
 newest installed numbered Valve build; `proton_10`/`proton_10.0` and explicit build
-names match installed versions. Other tool IDs use `compat_tools` appids to find
+names match installed versions. Valve profile values `proton-11.0-beta`,
+`proton-9.0-3RC` and `proton-10.0-3` select the installed `Proton <major>.<minor>`
+build, then the closest newer installed numbered Valve build of the same major,
+then `Proton - Experimental`, then the existing newest fallback. A different
+major and GE/UMU builds do not count as a same-major Valve match. Successful Valve
+selection logs `Valve runtime mapping: <raw recommendation> -> <installed name>`.
+Recipe pins and user overrides retain precedence and existing fallback behavior.
+Other tool IDs use `compat_tools` appids to find
 the installed build. Unavailable recommendations (including `native` when handed
 a Windows executable) log the raw value and fall back to newest; no runtime is
 downloaded. An unavailable user override falls back without trying Valve's choice.
