@@ -50,6 +50,8 @@ def test_installed_version_service_no_root(paths, decky, monkeypatch, service):
             assert timeout == 5
             return service.encode(), None
     monkeypatch.setattr(decky.subprocess, "Popen", lambda cmd, **kw: calls.append(cmd) or Proc())
+    # The password state is its own query (passwd -S); covered by its own tests.
+    monkeypatch.setattr(decky, "password_set", lambda: None)
     result = call(paths, "decky", "status")
     assert result["installed"] and result["version"] == "v3.3.1"
     assert result["service"] == service
@@ -450,3 +452,12 @@ def test_set_password_refuses_when_a_password_exists(tmp_path, monkeypatch):
     with pytest.raises(Error, match="already has a password"):
         decky.set_password(str(secret))
     assert not secret.exists()
+
+
+@pytest.mark.parametrize("output,expected", [(b"deck P 2026-09-03 0 99999 7 -1\n", True),
+    (b"deck NP 2026-09-03 0 99999 7 -1\n", False), (b"deck L 2026-09-03 0 99999 7 -1\n", False), (b"", None)])
+def test_password_set_reads_passwd_status(decky, monkeypatch, output, expected):
+    monkeypatch.setattr(decky.sys, "platform", "linux")
+    monkeypatch.setattr(decky.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(decky.steam, "run", lambda command, timeout: output)
+    assert decky.password_set() is expected
