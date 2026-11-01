@@ -1,12 +1,33 @@
 """Prepare locally, then replace this process with Proton. Optional fixes never block play."""
 import os
+import re
 from pathlib import Path
 import sys
 from . import content, localfix, net, recipes, splash, steam
 from .common import Error, atomic, app_id, locked, now, read_json, save_state, state
 
 
-def select_proton(available, recipe):
+def match_proton(available, name, aliases=None):
+    if name not in ("proton-stable", "proton-experimental", "proton_experimental"):
+        name = (aliases or {}).get(name, name)
+    exact = next((p for p in available if p["name"].lower() == name.lower()), None)
+    if exact:
+        return exact
+    if name in ("proton-experimental", "proton_experimental"):
+        return next((p for p in available if p["name"] == "Proton - Experimental"), None)
+    numbered = [p for p in available if re.fullmatch(r"Proton[ -]\d+(?:[.-]\d+)*", p["name"])]
+    if name == "proton-stable":
+        return next(iter(numbered), None)  # Already sorted by numeric version.
+    if re.fullmatch(r"proton[_ -]\d+(?:[._-]\d+)*", name, re.I):
+        def version(value):
+            return tuple(int(n) for n in re.findall(r"\d+", value))
+        wanted = version(name)
+        return next((p for p in numbered if (version(p["name"]) + (0,) * 8)[:8] ==
+                     (wanted + (0,) * 8)[:8]), None)
+    return None
+
+
+def select_proton(available, recipe, override=None, valve=None, aliases=None, log=lambda message: None):
     """Installed build for both launch fallback and read-only game previews."""
     pin = recipe.get("runtime", {}).get("proton", "GE-Proton")
     exact = next((p for p in available if recipe and p["name"] == pin), None)
@@ -14,13 +35,52 @@ def select_proton(available, recipe):
         return exact, "pinned"
     if not available:
         return None, None
+    if override:
+        selected = match_proton(available, override, aliases)
+        if selected:
+            return selected, "user_override"
+        log(f"User Proton override unavailable: {override}; using installed fallback")
+    elif not recipe and valve:
+        selected = match_proton(available, valve, aliases)
+        if selected:
+            return selected, "valve_recommended"
+        log(f"Valve recommendation unavailable: {valve}; using newest installed Proton")
     fallback = next((p for p in available if p["name"].startswith("GE-Proton")), available[0]) if recipe else available[0]
     return fallback, "recipe_fallback" if recipe else "newest"
 
 
-def resolve_proton(paths, recipe, budget, log):
+def selection(paths, ident, recipe, saved=None, available=None, metadata=None, log=lambda message: None):
+    from . import appinfo
+    metadata = appinfo.load(paths, log) if metadata is None else metadata
+    saved = saved or {}
+    valve = appinfo.recommendation(metadata, ident)
+    aliases = {}
+    tools = metadata.get("compat_tools", {})
+    installs = steam.installed(paths) if tools else {}
+    for name, value in tools.items():
+        if isinstance(value, dict) and str(value.get("appid")) in installs:
+            aliases[name] = Path(installs[str(value["appid"])]["path"]).resolve().name
+    previous = saved.get("previous_mapping")
+    if not saved.get("enabled"):
+        previous = steam.mappings(steam.read_vdf(steam.mapping_path(paths))).get(str(ident), previous)
+    override = saved.get("proton_override") or (previous.get("name") if isinstance(previous, dict) else None)
+    if override == "DeckCompanion":
+        override = None
+    selected, reason = select_proton(steam.proton(paths, log) if available is None else available,
+                                    recipe, override, valve, aliases, log)
+    return selected, reason, valve
+
+
+def resolve_proton(paths, recipe, budget, log, ident=None, saved=None, summary=None):
     available = steam.proton(paths, log)
-    selected, reason = select_proton(available, recipe)
+    if ident:
+        selected, reason, valve = selection(paths, ident, recipe, saved, available, log=log)
+    else:
+        selected, reason = select_proton(available, recipe)
+        valve = None
+    if summary is not None:
+        summary.update(proton={"name": selected["name"], "reason": reason} if selected else None,
+                       valve_recommendation=valve)
     runtime = recipe.get("runtime", {})
     pin = runtime.get("proton", "GE-Proton")
     if reason == "pinned":
@@ -30,6 +90,7 @@ def resolve_proton(paths, recipe, budget, log):
         # Recipe fallback retains its GE preference; unconfigured games use newest.
         fallback = selected
         log(f"Using installed {fallback['name']} (requested {pin})")
+        log(f"Proton selection reason: {reason}")
         return Path(fallback["path"])
     raise Error("no_proton", "No installed Proton available; install GE-Proton or Valve Proton in Steam")
 
@@ -77,7 +138,7 @@ def prepare(paths, verb, command, env=None, splash_info=None):
             recipe = recipes.load(paths, ident) or {}
             budget = net.Budget()
             # Resolve the recipe pin before optional work; keep it on later failure.
-            proton = resolve_proton(paths, recipe, budget, log)
+            proton = resolve_proton(paths, recipe, budget, log, ident, saved, splash_info)
             prefix_raw = env.get("STEAM_COMPAT_DATA_PATH")
             prefix = Path(prefix_raw).resolve() if prefix_raw else None
             entry = steam.installed(paths).get(ident, {})
@@ -138,10 +199,9 @@ def prepare(paths, verb, command, env=None, splash_info=None):
             steps += ["Registry: " + step["key"] + " / " + step["name"] for step in wine.get("registry", [])]
             steps += ["DLL: " + key + " = " + value for key, value in wine.get("dll_overrides", {}).items()]
             steps += ["Environment: " + key for key in wine.get("env", {})]
-            pin = recipe.get("runtime", {}).get("proton", "GE-Proton")
             splash_info.update(appid=raw_ident, name=(entry or recipe).get("name", raw_ident),
                 art=steam.artwork(paths, raw_ident), recipe_version=recipe.get("version"),
-                proton={"name": proton.name, "reason": "pinned" if recipe and proton.name == pin else "recipe_fallback" if recipe else "newest"},
+                proton=(splash_info.get("proton") or {"name": proton.name, "reason": "newest"}),
                 fixes={"upstream_chained": chain_ready, "wine_steps_count": len(steps), "wine_steps": steps},
                 mods=mods, warnings=list(warnings))
         except Exception as exc:

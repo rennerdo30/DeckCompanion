@@ -114,7 +114,8 @@ def test_cli_shapes_and_errors(paths, monkeypatch, capsys):
     code, result = invoke(capsys, "games")
     assert code == 0
     fs = next(g for g in result["games"] if g["appid"] == "2300320")
-    assert set(fs) == {"appid", "name", "installed", "has_recipe", "enabled", "pending", "recipe_version", "mods", "last_launch", "art", "proton"}
+    assert set(fs) == {"appid", "name", "installed", "has_recipe", "enabled", "pending", "recipe_version", "mods", "last_launch", "art", "proton",
+                       "takeover", "previous_mapping", "valve_recommendation"}
     assert fs["last_launch"] is None and fs["enabled"] is False
     assert set(fs["mods"][0]) == {"id", "name", "version", "enabled", "installed_version", "state", "state_message"}
     assert invoke(capsys, "mod", "2300320", "fs25-deck-mode", "--off")[1]["mods"][0]["enabled"] is False
@@ -124,7 +125,8 @@ def test_cli_shapes_and_errors(paths, monkeypatch, capsys):
     assert isinstance(detail["log_tail"], list) and len(detail["log_tail"]) == 200
     assert detail["log_tail"][0] == "30"
     assert "notes" in detail
-    assert set(invoke(capsys, "status")[1]) == {"version", "install_path", "steam_running", "default_tool", "pending", "proton", "last_apply"}
+    assert set(invoke(capsys, "status")[1]) == {"version", "install_path", "steam_running", "default_tool", "pending", "proton", "last_apply",
+                                               "takeover_all", "takeover_counts"}
     assert invoke(capsys, "status")[1]["last_apply"] is None
     code, error = invoke(capsys, "enable", "../bad")
     assert code == 1 and error["error"]["code"] == "invalid_appid"

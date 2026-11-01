@@ -84,6 +84,7 @@ def game(paths, saved):
             "enabled": True, "pending": None, "shortcut_pending": saved.get("pending"),
             "recipe_version": recipe.get("version"), "mods": mods, "last_launch": saved.get("last_launch"),
             "notes": recipe.get("notes", ""), "art": steam.artwork(paths, saved["appid"]),
+            "takeover": "n/a", "previous_mapping": None, "valve_recommendation": None,
             "proton": dict(proton, reason=reason) if proton else None}
 
 

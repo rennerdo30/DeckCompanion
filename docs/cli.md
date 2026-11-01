@@ -94,17 +94,17 @@ vendored or included in the MIT release tarball. **Not verified on hardware.**
   or `{"action":"default_off"}` without an appid for a queued global change.
   `last_apply` is null before a helper run, then the content of `logs/apply-last.json`.
 
-- `settings --json` -> `{"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true,"auto_install_ge":true,"cleanup_old_ge":true}`.
+- `settings --json` -> `{"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true,"auto_install_ge":true,"cleanup_old_ge":true,"takeover_all":true}`.
   Returns all persisted settings plus defaults; reading does not write the state file.
   `settings --set key=value [--set key=value ...] --json` validates all entries before
   saving. Boolean keys `splash`, `show_games_without_recipe`,
-  `check_updates_on_start`, `auto_install_ge` and `cleanup_old_ge` accept true/false or on/off; all default on. Numeric
+  `check_updates_on_start`, `auto_install_ge`, `cleanup_old_ge` and `takeover_all` accept true/false or on/off; all default on. Numeric
   `splash_seconds` defaults to 4 and clamps finite numbers to 1–10. Unknown keys,
   malformed entries, invalid booleans and nonfinite numbers fail without partial writes.
   `settings --splash on|off --splash-seconds N --json` updates either or both values
   under `settings` in state, preserving other settings and game data. Defaults are
   on and 4 seconds; finite durations clamp to 1–10 seconds. Changes take effect on
-  the next game launch and need no Steam restart. Nonfinite values are rejected.
+  the next game launch and need no Steam restart (except `takeover_all`, described below). Nonfinite values are rejected.
   Splash flags are aliases and take precedence over `--set` for the same key.
   Library visibility and automatic update checks are UI preferences; the UI runs
   `update --detach` once on open when enabled. Global
@@ -152,6 +152,106 @@ an interrupted or service-timeout run can leave that receipt for diagnosis. A se
 helper fails with `busy` without touching the active receipt or Steam. The internal
 CLI exits 1 when the receipt contains errors. Not verified on hardware.
 
+## Installed-game takeover and Valve recommendations
+
+`takeover_all` defaults **on**. `settings --set takeover_all=on|off --json`
+returns the complete SETTINGS object above and queues mapping changes in state.
+`game-option APPID --takeover off --json` excludes one game and queues restoration;
+`--takeover on` clears its exclusion (it still respects the global setting).
+These commands return the same GAME object as `game APPID --json`.
+`disable APPID` also sets an exclusion; `enable APPID` clears it.
+`game-option APPID --proton "Proton 10.0" --json` persists an engine runtime override;
+`--proton auto` clears that explicit override. Takeover and Proton options can be combined.
+
+`apply`, `install` and `update` discover new installations and reconcile takeover.
+An otherwise empty `apply` still discovers new games. `update` adds the boolean
+`steam_changes_pending` to its existing result. Settings and discovery never write
+Steam files. Queued writes use the existing `apply --restart-steam` detached helper,
+backups, semantic verification and one retry; use `status.pending` and
+`status.last_apply` to follow them. Global mapping `0` remains independently controlled
+by `default --on|--off`; takeover-off restores per-game entries only.
+
+Steam titles must have a library `appmanifest_*.acf`. Classification skips
+uninstalled manifests (`StateFlags & 1`) and appinfo types other than game/application.
+Explicit manifest `UserConfig/platform_override_dest` (or manifest `oslist`) wins.
+Otherwise, match `InstalledDepots` against appinfo depot `config/oslist`: Linux
+depots mean native, Windows depots mean Windows. If depot evidence is absent, use
+`common/oslist`, then the full depot OS list; include Windows-only entries, skip
+Linux-capable or unknown entries. Thus a cross-platform game with an installed
+Windows depot is included, while its installed Linux build is skipped. Missing or
+unreadable appinfo does not turn unknown games into Windows games.
+Existing shortcuts in every `userdata/*/config/shortcuts.vdf` are eligible only
+when their quoted/unquoted `Exe` ends in `.exe` (case insensitive). Their unsigned
+32-bit appid is used. Native shortcuts and the UI/umu native wrappers are excluded;
+shortcut contents are never changed by takeover. `.exe` shortcuts appear in GAMES
+with `kind:"shortcut"`; registered umu games retain `kind:"non_steam"`.
+
+Every eligible game gets `{"name":"DeckCompanion","config":"","priority":"250"}`,
+including games with an existing per-game tool. State snapshots the complete previous
+entry before queueing the first write; repeated apply/install/update retains it.
+Global off, exclusion, removal of the installation/shortcut, and uninstall restore
+that exact entry (including extra fields), or remove it if none existed. As with
+manual disable, a later foreign mapping is preserved during restoration. State,
+cache and backups remain recovery data. Uninstall suppresses future takeover until
+the next install.
+
+GAME and each GAMES row add these exact fields:
+
+```json
+{"takeover":"on","previous_mapping":"proton-stable","valve_recommendation":"proton-experimental",
+ "proton":{"name":"Proton 11.0","reason":"user_override"}}
+```
+
+`takeover` is `"on"` when eligible, globally on and included (wanted, possibly pending),
+`"excluded"` for an eligible game with a per-game exclusion, otherwise `"n/a"`.
+`enabled` and `pending` retain their applied/queued meanings. `previous_mapping`
+is the saved previous tool name or null; the complete entry is internal state.
+Registered umu wrappers report `takeover:"n/a"`, `previous_mapping:null` and
+`valve_recommendation:null`. `valve_recommendation` is the raw local runtime string
+or null, even when an override or recipe wins. No installed runtime means `proton:null`.
+STATUS adds these exact fields (example counts):
+
+```json
+{"takeover_all":true,"takeover_counts":{"eligible":4,"on":3,"excluded":1,"applied":2,"pending":1}}
+```
+
+`eligible` counts installed Windows titles/shortcuts; `on`/`excluded` count wanted
+states. `applied` counts enabled takeover-owned entries (including pending restores);
+`pending` counts takeover-owned queued enables/restores. Discovery itself is read-only;
+pending counts reflect the persisted queue after a mutating command.
+
+Appinfo is read-only and streamed by sized record, supporting magic `0x07564428`
+and `0x07564429` (the latter uses the trailing key string table). Unknown binary
+value types skip their containing record; malformed/truncated files fall back to
+no metadata. Extracted OS data, recommendation configuration and Steam Play tool
+maps are cached in `<cache>/appinfo.json` by absolute source path, nanosecond mtime
+and size; missing or changed sources never reuse stale metadata.
+
+The checked field names are `common/steam_deck_compatibility/configuration/recommended_runtime`,
+and app `891390`'s `extended/app_mappings/<appid>/tool` plus
+`extended/compat_tools/<tool>/appid` (see [Protontricks' implementation](https://github.com/Matoking/protontricks/blob/master/src/protontricks/steam.py)
+and [SteamAppInfo's format specification](https://github.com/ValveResourceFormat/SteamAppInfo#appinfovdf)).
+The cache retains the complete Deck `configuration`, including unknown keys, and
+the two Steam Play maps exactly as parsed (key names normalized to lowercase).
+The Deck profile wins over an app-mapping override. No real Deck appinfo was inspected.
+
+Selection precedence is installed exact recipe pin, explicit user override (or
+the game's saved pre-takeover Steam tool), then Valve recommendation for recipe-less
+games, then the existing fallback. A recipe without an installed pin retains its
+GE/newest fallback and does not use Valve metadata. Reasons are `pinned`,
+`user_override`, `valve_recommended`, `recipe_fallback`, or `newest`.
+`proton-experimental` selects `Proton - Experimental`; `proton-stable` selects the
+newest installed numbered Valve build; `proton_10`/`proton_10.0` and explicit build
+names match installed versions. Other tool IDs use `compat_tools` appids to find
+the installed build. Unavailable recommendations (including `native` when handed
+a Windows executable) log the raw value and fall back to newest; no runtime is
+downloaded. An unavailable user override falls back without trying Valve's choice.
+Launch and GAME/GAMES use the same selector; splash `proton.reason` reflects it too.
+
+**Not verified on hardware:** real SteamOS appinfo parsing, classification of actual
+installed depots/shortcuts, Steam recognizing per-game takeover after retry, exact
+restoration and launching via Valve's recommended runtime. Parent owns those checks.
+
 GAME:
 ```json
 {"appid":"2300320","name":"Farming Simulator 25","installed":true,
@@ -180,8 +280,7 @@ and `logo`. Non-Steam shortcut fallback uses the selected user's
 null so the UI can use its own fallback. No artwork is downloaded.
 
 `proton` is null when no installed Proton is usable, otherwise an object with
-`name` and `reason`: `pinned` for an installed exact recipe pin, `recipe_fallback`
-for the recipe's installed GE/newest fallback, or `newest` without a recipe.
+`name` and `reason`: see the selection precedence and reasons above.
 This uses launch's installed-build selector without downloads, extraction, logs,
 or state changes. Launch never downloads a Proton runtime; use update or install.
 
@@ -250,7 +349,7 @@ game, including `--json`. Runtime env and launch options come from the recipe.
 
 `last_launch.ok` means preparation/handoff succeeded, not that the game ran or
 exited successfully. The engine cannot observe the result after `execve`.
-A game without a recipe uses the newest installed Proton by parsed numeric version,
+A game without a recipe or usable override/recommendation uses the newest installed Proton by parsed numeric version,
 including GE-Proton/UMU-Proton under `compatibilitytools.d` and Valve Proton from
 all Steam libraries. A `proton` script must exist. Runtime/DeckCompanion/other
 non-Proton folders are excluded. Symlink aliases resolve to one target.

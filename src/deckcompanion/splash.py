@@ -14,7 +14,7 @@ HOLD_SECONDS = 120
 HARD_TIMEOUT = 130
 DEFAULTS = {"splash": True, "splash_seconds": 4.0,
             "show_games_without_recipe": True, "check_updates_on_start": True,
-            "auto_install_ge": True, "cleanup_old_ge": True}
+            "auto_install_ge": True, "cleanup_old_ge": True, "takeover_all": True}
 
 
 def settings(data):
