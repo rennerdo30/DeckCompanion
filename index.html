@@ -14,7 +14,7 @@
 :root{
   --bg:#070d12; --bg2:#0b141b; --surface:#101c25; --surface2:#16262f; --line:#24404c;
   --ink:#e7f1f4; --muted:#93a9b4; --mint:#b8f18b; --cream:#e9d9a0; --teal:#2f6f68;
-  --radius:18px; --max:1180px;
+  --radius:18px; --max:1320px;
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
@@ -41,19 +41,33 @@ nav a:hover{color:var(--ink);text-decoration:none}
 /* hero */
 .hero{position:relative;overflow:hidden;padding:90px 0 60px}
 .hero::before{content:"";position:absolute;inset:0;background:url(assets/hero.png) center 70%/cover no-repeat;opacity:.35;mask-image:linear-gradient(to bottom,#000 30%,transparent 95%);-webkit-mask-image:linear-gradient(to bottom,#000 30%,transparent 95%)}
-.hero .wrap{position:relative;display:grid;grid-template-columns:1.05fr 1fr;gap:48px;align-items:center}
+.hero .wrap{position:relative;display:grid;grid-template-columns:.85fr 1.25fr;gap:44px;align-items:center}
 .kicker{display:inline-block;color:var(--mint);font-weight:700;letter-spacing:.14em;font-size:13px;text-transform:uppercase;margin-bottom:14px}
 h1{font-size:clamp(38px,5vw,62px);line-height:1.05;margin:0 0 18px;letter-spacing:-.02em}
 h1 em{font-style:normal;color:var(--mint)}
 .lead{font-size:20px;color:#c3d3da;max-width:34em;margin:0 0 28px}
-.install{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:14px 14px 14px 18px;display:flex;align-items:center;gap:12px;font:15px/1.4 ui-monospace,"Cascadia Code",Consolas,monospace;color:var(--ink);max-width:560px}
-.install code{flex:1;overflow-x:auto;white-space:nowrap}
+.install{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:12px 12px 12px 16px;display:flex;align-items:center;gap:12px;font:14px/1.5 ui-monospace,"Cascadia Code",Consolas,monospace;color:var(--ink);max-width:600px}
+.install code{flex:1;white-space:normal;overflow-wrap:anywhere}
 .install code b{color:var(--mint);font-weight:400}
 .copy{flex:none;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:7px 12px;font:600 13px system-ui;cursor:pointer}
 .copy.done{border-color:var(--mint);color:var(--mint)}
 .hint{color:var(--muted);font-size:14px;margin:12px 0 0}
 .device{border-radius:26px;padding:14px;background:linear-gradient(160deg,#1b2a33,#0e171d);box-shadow:0 40px 80px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.06);border:1px solid #23363f}
-.device img{border-radius:14px}
+.device img{border-radius:14px;cursor:zoom-in}
+.get{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:0 0 18px}
+.btn.big{padding:15px 26px;font-size:17px}
+.steps-inline{margin:0 0 18px;padding:0;list-style:none;counter-reset:i;color:#c3d3da;font-size:16px}
+.steps-inline li{counter-increment:i;margin:6px 0;padding-left:34px;position:relative}
+.steps-inline li::before{content:counter(i);position:absolute;left:0;top:1px;width:24px;height:24px;border-radius:50%;background:rgba(184,241,139,.14);color:var(--mint);font:700 13px/24px system-ui;text-align:center}
+details.alt{background:transparent;border:0;padding:0;margin:0;max-width:600px}
+details.alt summary{font-size:15px;color:var(--muted);font-weight:600}
+details.alt summary::after{content:""}
+details.alt .install{margin-top:10px}
+.lightbox{position:fixed;inset:0;z-index:50;background:rgba(3,7,10,.92);display:none;align-items:center;justify-content:center;padding:3vw;cursor:zoom-out}
+.lightbox.open{display:flex}
+.lightbox img{max-width:min(1600px,96vw);max-height:92vh;border-radius:14px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+html{scrollbar-color:#2a4652 #070d12}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-track{background:#070d12}::-webkit-scrollbar-thumb{background:#2a4652;border-radius:8px}
 
 /* sections */
 section{padding:84px 0}
@@ -66,7 +80,8 @@ h2{font-size:clamp(28px,3.4vw,40px);margin:0 0 12px;letter-spacing:-.01em}
 .icon{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:rgba(184,241,139,.12);color:var(--mint);font-size:21px}
 
 /* showcase */
-.show{display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:center;margin-bottom:84px}
+.show{display:grid;grid-template-columns:.72fr 1.28fr;gap:48px;align-items:center;margin-bottom:96px}
+.show.flip{grid-template-columns:1.28fr .72fr}
 .show:last-child{margin-bottom:0}
 .show.flip .text{order:2}
 .show .text h3{font-size:28px;margin:0 0 12px;letter-spacing:-.01em}
@@ -128,11 +143,22 @@ footer p{margin:0;max-width:52em}
       <span class="kicker">For Steam Deck · SteamOS</span>
       <h1>Every game, <em>set up right</em>, before you press play.</h1>
       <p class="lead">DeckCompanion picks the right Proton for each game, applies community and per-game fixes, installs mods and shows you exactly what runs, all from a controller-friendly app in your Steam library.</p>
-      <div class="install" id="install">
-        <code><b>$</b> curl -fsSL https://deckcompanion.renner.dev/install.sh | sh</code>
-        <button class="copy" data-copy="curl -fsSL https://deckcompanion.renner.dev/install.sh | sh">Copy</button>
+      <div class="get" id="install">
+        <a class="btn primary big" href="DeckCompanion-Installer.desktop" download>⬇&nbsp; Download for Steam Deck</a>
+        <a class="btn big" href="https://github.com/rennerdo30/DeckCompanion">View on GitHub</a>
       </div>
-      <p class="hint">Run it once in Desktop Mode (Konsole). No root, no system changes. Everything lives in your home folder and survives SteamOS updates.</p>
+      <ol class="steps-inline">
+        <li>Switch to <b>Desktop Mode</b> and open this page.</li>
+        <li>Download the installer, open your Downloads folder and double-click it.</li>
+        <li>Return to <b>Gaming Mode</b>: DeckCompanion is in your library.</li>
+      </ol>
+      <details class="alt"><summary>Prefer the terminal? ›</summary>
+        <div class="install">
+          <code><b>$</b> curl -fsSL https://deckcompanion.renner.dev/install.sh | sh</code>
+          <button class="copy" data-copy="curl -fsSL https://deckcompanion.renner.dev/install.sh | sh">Copy</button>
+        </div>
+      </details>
+      <p class="hint">No root, no system changes. Everything lives in your home folder and survives SteamOS updates.</p>
     </div>
     <div class="device"><img src="assets/shots/preview.png" alt="DeckCompanion library on a Steam Deck with a live game preview" width="1280" height="800"></div>
   </div>
@@ -208,7 +234,7 @@ footer p{margin:0;max-width:52em}
       <div class="text">
         <h3>Recipes are open, and you can add yours</h3>
         <p>A recipe is a small TOML file per game: the Proton build, Wine fixes, mods and settings. Recipes ship separately from the app, so a fix reaches every Deck without a new release.</p>
-        <p><a href="https://github.com/rennerdo30/DeckCompanion/blob/main/CONTRIBUTING.md">Submit a recipe or a fix →</a></p>
+        <div class="get"><a class="btn primary" href="https://github.com/rennerdo30/DeckCompanion/issues/new?template=recipe.yml">Submit a recipe</a><a class="btn" href="https://github.com/rennerdo30/DeckCompanion/issues/new?template=game-report.yml">Report a game</a></div><p class="hint">Opens a ready-made form on GitHub. Want to write the recipe yourself? See the <a href="https://github.com/rennerdo30/DeckCompanion/blob/main/CONTRIBUTING.md">recipe guide</a>.</p>
       </div>
       <div class="device"><img src="assets/shots/add-launchers.png" alt="Add a game: store launchers and Windows games" loading="lazy" width="1280" height="800"></div>
     </div>
@@ -218,6 +244,7 @@ footer p{margin:0;max-width:52em}
 <section id="faq">
   <div class="wrap">
     <h2>Questions</h2>
+    <details><summary>How do I install it?</summary><p>In Desktop Mode, download the installer from this page and double-click it in your Downloads folder (choose "Continue"/"Execute" if asked). It opens a terminal, installs DeckCompanion into your home folder and restarts Steam once. Prefer the terminal? Run <code>curl -fsSL https://deckcompanion.renner.dev/install.sh | sh</code>.</p></details>
     <details><summary>Does it change my system?</summary><p>No. DeckCompanion installs into your home folder only, needs no root and no system packages, and keeps working after SteamOS updates.</p></details>
     <details><summary>Can I go back to how things were?</summary><p>Yes. DeckCompanion stores a snapshot of every Steam compatibility setting it changes. "Restore all" in Settings puts every game back, and uninstalling does the same.</p></details>
     <details><summary>Which Proton does a game get?</summary><p>In this order: a recipe's pinned build, your own choice, GE-Proton when a community fix exists, Valve's recommendation, then the newest installed build.</p></details>
@@ -229,11 +256,8 @@ footer p{margin:0;max-width:52em}
 <section class="cta">
   <div class="wrap">
     <h2>Ready when you are</h2>
-    <p class="sub" style="margin:0 auto">Open Konsole in Desktop Mode and paste one line.</p>
-    <div class="install">
-      <code><b>$</b> curl -fsSL https://deckcompanion.renner.dev/install.sh | sh</code>
-      <button class="copy" data-copy="curl -fsSL https://deckcompanion.renner.dev/install.sh | sh">Copy</button>
-    </div>
+    <p class="sub" style="margin:0 auto 24px">Download the installer in Desktop Mode and double-click it.</p>
+    <a class="btn primary big" href="DeckCompanion-Installer.desktop" download>⬇&nbsp; Download for Steam Deck</a>
   </div>
 </section>
 </main>
@@ -241,9 +265,10 @@ footer p{margin:0;max-width:52em}
 <footer>
   <div class="wrap">
     <p>DeckCompanion is an independent open-source project (MIT). It is not affiliated with or endorsed by Valve or any game publisher. Steam, Steam Deck and SteamOS are trademarks of Valve Corporation. Game artwork shown in screenshots belongs to its respective owners.</p>
-    <p><a href="https://github.com/rennerdo30/DeckCompanion">GitHub</a> · <a href="https://github.com/rennerdo30/DeckCompanion/blob/main/CONTRIBUTING.md">Contribute a recipe</a> · <a href="https://renner.dev">renner.dev</a></p>
+    <p><a href="https://github.com/rennerdo30/DeckCompanion">GitHub</a> · <a href="https://github.com/rennerdo30/DeckCompanion/issues/new?template=recipe.yml">Submit a recipe</a> · <a href="https://github.com/rennerdo30/DeckCompanion/issues/new?template=game-report.yml">Report a game</a> · <a href="https://renner.dev">renner.dev</a></p>
   </div>
 </footer>
+<div class="lightbox" id="lightbox"><img alt=""></div>
 <script>
 document.querySelectorAll(".copy").forEach(function (b) {
   b.addEventListener("click", function () {
@@ -253,6 +278,12 @@ document.querySelectorAll(".copy").forEach(function (b) {
     });
   });
 });
+var box = document.getElementById("lightbox"), big = box.querySelector("img");
+document.querySelectorAll(".device img").forEach(function (img) {
+  img.addEventListener("click", function () { big.src = img.src; big.alt = img.alt; box.classList.add("open"); });
+});
+box.addEventListener("click", function () { box.classList.remove("open"); });
+document.addEventListener("keydown", function (e) { if (e.key === "Escape") box.classList.remove("open"); });
 </script>
 </body>
 </html>

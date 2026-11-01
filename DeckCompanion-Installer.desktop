@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Install DeckCompanion
+Comment=Install DeckCompanion in your home folder and add it to your Steam library
+Terminal=false
+Icon=system-software-install
+Exec=konsole --hold -e bash -o pipefail -c "curl -fsSL --proto =https --proto-redir =https --connect-timeout 10 --max-time 30 https://deckcompanion.renner.dev/install.sh | timeout 300s sh"
+Categories=Utility;
