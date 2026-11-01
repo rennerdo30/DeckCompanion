@@ -142,10 +142,99 @@ error; optional recipe, content and splash failures log and continue the handoff
 The GPL-3.0 zipapp runs only as a separate process. No runtime code is imported,
 vendored or included in the MIT release tarball. **Not verified on hardware.**
 
+## Existing Steam shortcuts
+
+`games --json` lists user shortcuts directly from the active account's
+`shortcuts.vdf`. The account uses `DECKCOMPANION_STEAM_USER_ID` when supplied,
+otherwise the existing single-account/most-recent-localconfig selection. Other
+accounts' shortcuts are not library rows. Compatibility mappings remain
+machine-wide: eligible Windows shortcuts across accounts still participate in
+takeover discovery.
+
+Here is the exact GAME shape for a Windows shortcut without a recipe or installed
+Proton build, before takeover is applied. These paths/timestamp are example data:
+
+```json
+{
+  "appid": "3135360851",
+  "name": "Battle.net",
+  "installed": true,
+  "has_recipe": false,
+  "enabled": false,
+  "pending": null,
+  "recipe_version": null,
+  "mods": [],
+  "last_launch": null,
+  "art": {
+    "portrait": "/home/deck/.local/share/Steam/userdata/123/config/grid/3135360851p.png",
+    "header": null,
+    "hero": null,
+    "logo": null,
+    "icon": null
+  },
+  "last_played": 1793530000,
+  "exe": "/home/deck/pfx/Battle.net Launcher.exe",
+  "start_dir": "/home/deck/pfx",
+  "kind": "steam_shortcut",
+  "takeover": "on",
+  "previous_mapping": "Proton-GE Latest",
+  "valve_recommendation": null,
+  "options": {"proton": true, "takeover": true},
+  "proton": null
+}
+```
+
+`game APPID --json` returns the same GAME plus `notes` and `log_tail`. The `exe`
+and `start_dir` values have surrounding quotes removed and path separators
+normalized. Key casing in Steam's binary file is ignored. `last_played` is the
+positive Unix timestamp in shortcut `LastPlayTime`, or null when absent/zero/invalid;
+it does not use `localconfig.vdf` for these rows. `art` reads the active account's
+grid files, with `portrait = <appid>p`, `header = <appid>`, `hero = <appid>_hero`,
+`logo = <appid>_logo`, `icon = <appid>_icon`. Extensions are tried in order
+`.png`, `.jpg`, `.jpeg`; absent images are null. Appcache artwork cannot override
+these shortcut images.
+
+Windows `.exe` paths (case insensitive) expose both options as true and join
+takeover. `takeover` uses the existing `on`, `excluded`, `n/a` labels, while
+`enabled`/`pending` describe what has actually been applied/queued. The first
+affected complete mapping, including absence and custom keys, follows the
+immutable DC-34 snapshot/restore rules. `previous_mapping` exposes its saved
+session mapping's name (or the snapshot/current mapping before a session exists),
+not the complete internal VDF entry. Missing mappings report null.
+
+Native ELF/AppImage/script shortcuts remain installed library rows with
+`options: {"proton": false, "takeover": false}`, `takeover: "n/a"`, and
+`proton: null`. An extensionless Devkit/native shortcut with an explicit nonempty
+CompatToolMapping exposes `options: {"proton": true, "takeover": false}`; its
+mapping enables Proton selection without classifying a native executable as a
+Windows `.exe`. Proton selection uses the same override/mapping/recipe/Valve/
+newest-installed logic and `{ "name": "Proton 11.0", "reason": "user_override" }`
+shape as Steam games; no installed build yields null. Native, unmapped shortcuts
+have no Valve recommendation.
+
+DeckCompanion's own UI entries are hidden by executable path identity, regardless
+of their title, appid, quoting or path/key case. Registered umu wrappers remain
+one `kind: "non_steam"` row each. Install queues UI repair when duplicates exist;
+it retains the current appid's record when present (otherwise the first owned
+record), preserves Steam-added fields such as tags and LastPlayTime, and writes
+the current identity exactly once. Absolute UI executable paths, or relative
+`deckcompanion-ui` with our bin StartDir, establish path ownership. Existing
+current-appid ownership is retained for repairing damaged owned fields.
+
+Apply removes obsolete identities' CompatToolMapping entries and
+`grid/<appid>{,p,_hero,_logo,_icon}.png` through the same guarded, backed-up,
+rollback-capable transaction as shortcut writes. Shared ids used by a foreign
+shortcut keep their mapping/artwork. Steam-added keys come from the kept entry;
+removed entries are available in the shortcut backup. Historical state records
+for removed UI identities stay recoverable but cannot become library games or
+restore their obsolete mappings. Unchanged repeated installs queue no restart.
+No UI or Steam file is changed merely by listing the library.
+
 ## Commands available in slice 1
 
 - `games --json` -> `{"games":[GAME,...]}`. Includes installed games, bundled/cached
-  recipes, and games with saved state. IDs are strings. No network requests.
+  recipes, games with saved state, and every user shortcut of the active Steam
+  account. IDs are unsigned decimal strings. No network requests.
 - `game APPID --json` -> GAME plus `notes` (string) and `log_tail` (array of strings, last 200 lines, newlines stripped).
 - `enable APPID --json` / `disable APPID --json` -> GAME. Queues a mapping change;
   does not write Steam files. Enable also attempts immediate mod reconciliation.
@@ -162,7 +251,9 @@ vendored or included in the MIT release tarball. **Not verified on hardware.**
   `changed_now` is true only when this mod's content or ownership changed during this command.
 - `apply [--restart-steam] --json` -> `{"applied":[{"appid":"2300320","action":"enable"}],"steam_restarted":true}`.
   Global default changes have `{"action":"default_on"}` or `{"action":"default_off"}`.
-  Installer shortcut changes have `{"action":"shortcut"}`. Without restart, Steam must already
+  Installer shortcut changes have `{"action":"shortcut"}`. Obsolete UI shortcut
+  identities also emit `{"appid":"3140405199","action":"remove_shortcut"}` for
+  each removed appid (ascending order, before `shortcut`). Without restart, Steam must already
   be closed. On Linux with Steam running, restart hands off and returns immediately:
   `{"applied":[],"scheduled":true,"steam_restarted":false,"helper":"deckcompanion-apply-<timestamp>"}`.
   The UI can show **Steam will restart now**. Scheduling does not confirm writes succeeded.
@@ -273,8 +364,9 @@ or compatibility mapping; depot/executable guesses alone do not opt it in.
 Existing shortcuts in every `userdata/*/config/shortcuts.vdf` are eligible only
 when their quoted/unquoted `Exe` ends in `.exe` (case insensitive). Their unsigned
 32-bit appid is used. Native shortcuts and the UI/umu native wrappers are excluded;
-shortcut contents are never changed by takeover. `.exe` shortcuts appear in GAMES
-with `kind:"shortcut"`; registered umu games retain `kind:"non_steam"`.
+shortcut contents are never changed by takeover. Active-account user shortcuts,
+including native ones, appear in GAMES with `kind:"steam_shortcut"`; registered
+umu games retain `kind:"non_steam"`.
 
 Every eligible game gets `{"name":"DeckCompanion","config":"","priority":"250"}`,
 including games with an existing per-game tool. State snapshots the complete previous
@@ -324,6 +416,8 @@ before apply returns the same pending entries; after restoration it returns
 `{"restoring":0,"pending":[]}` and apply needs no restart. The snapshot is retained
 as recovery data. Uninstall uses this same queue/apply path while retaining its
 existing closed-Steam requirement and file/shortcut cleanup.
+Obsolete management UI identities removed by duplicate cleanup are excluded from
+restore actions; their original snapshot entries remain intact for recovery.
 
 GAME and each GAMES row add these exact fields:
 
