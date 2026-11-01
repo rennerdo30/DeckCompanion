@@ -129,3 +129,14 @@ def test_cli_shapes_and_errors(paths, monkeypatch, capsys):
     code, error = invoke(capsys, "enable", "../bad")
     assert code == 1 and error["error"]["code"] == "invalid_appid"
     assert invoke(capsys, "missing")[1]["error"]["code"] == "invalid_arguments"
+
+
+def test_shortcut_user_picks_most_recent_account(paths, monkeypatch):
+    import os
+    monkeypatch.delenv("DECKCOMPANION_STEAM_USER_ID")
+    for ident, mtime in (("0", 300), ("73549515", 200), ("702852743", 100)):
+        config = paths.steam / "userdata" / ident / "config"
+        config.mkdir(parents=True)
+        (config / "localconfig.vdf").write_text('"UserLocalConfigStore"\n{\n}\n')
+        os.utime(config / "localconfig.vdf", (mtime, mtime))
+    assert steam.shortcut_path(paths).parent.parent.name == "73549515"

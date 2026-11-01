@@ -312,3 +312,13 @@ def test_release_includes_optional_ui_and_logo(tmp_path, monkeypatch, with_paylo
             assert (name in names) is with_payload
         if with_payload:
             assert tar.getmember("bin/deckcompanion-ui").mode & 0o111
+
+
+def test_gamescope_wl_counts_as_game_mode(tmp_path, monkeypatch):
+    from deckcompanion import apply_helper
+    proc = tmp_path / "proc"
+    (proc / "42").mkdir(parents=True)
+    (proc / "42" / "comm").write_text("gamescope-wl\n")
+    real_path = apply_helper.Path
+    monkeypatch.setattr(apply_helper, "Path", lambda p: proc if p == "/proc" else real_path(p))
+    assert apply_helper.gamescope_running()

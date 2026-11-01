@@ -13,7 +13,8 @@ def gamescope_running():
     for path in Path("/proc").glob("[0-9]*/comm"):
         try:
             name = path.read_text().strip()
-            if name == "gamescope" or name.startswith("start-gamescope"):
+            # SteamOS 3.9 runs the compositor as "gamescope-wl".
+            if name in ("gamescope", "gamescope-wl") or name.startswith("start-gamescope"):
                 return True
         except FileNotFoundError:
             continue

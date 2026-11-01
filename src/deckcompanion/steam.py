@@ -118,11 +118,17 @@ def mappings(doc):
 
 def shortcut_path(paths):
     user = os.environ.get("DECKCOMPANION_STEAM_USER_ID")
-    users = list((paths.steam / "userdata").glob("[0-9]*"))
+    # "0" is Steam's anonymous placeholder, never a real account.
+    users = [u for u in (paths.steam / "userdata").glob("[0-9]*") if u.name != "0"]
+    recent = [u for u in users if (u / "config/localconfig.vdf").is_file()]
     if user:
         user = app_id(user)
     elif len(users) == 1:
         user = users[0].name
+    elif recent:
+        # Steam rewrites localconfig.vdf for the signed-in account; loginusers.vdf
+        # had no MostRecent flag on SteamOS 3.9 (hardware check 2026-11-01).
+        user = max(recent, key=lambda u: (u / "config/localconfig.vdf").stat().st_mtime).name
     else:
         raise Error("steam_user_required", "Set DECKCOMPANION_STEAM_USER_ID to choose a Steam account")
     return paths.steam / "userdata" / user / "config/shortcuts.vdf"
