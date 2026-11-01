@@ -41,10 +41,6 @@ def match_proton(available, name, aliases=None, valve=False):
 def select_proton(available, recipe, override=None, valve=None, aliases=None, log=lambda message: None,
                   community_builds=()):
     """Installed build for both launch fallback and read-only game previews."""
-    pin = recipe.get("runtime", {}).get("proton", "GE-Proton")
-    exact = next((p for p in available if recipe and p["name"] == pin), None)
-    if exact:
-        return exact, "pinned"
     if not available:
         return None, None
     if override:
@@ -52,6 +48,10 @@ def select_proton(available, recipe, override=None, valve=None, aliases=None, lo
         if selected:
             return selected, "user_override"
         log(f"User Proton override unavailable: {override}; using installed fallback")
+    pin = recipe.get("runtime", {}).get("proton", "GE-Proton")
+    exact = next((p for p in available if recipe and p["name"] == pin), None)
+    if exact:
+        return exact, "pinned"
     if community_builds:
         return community_builds[0], "community_fix"
     if not override and not recipe and valve:
@@ -60,7 +60,7 @@ def select_proton(available, recipe, override=None, valve=None, aliases=None, lo
             log(f"Valve runtime mapping: {valve} -> {selected['name']}")
             return selected, "valve_recommended"
         log(f"Valve recommendation unavailable: {valve}; using newest installed Proton")
-    fallback = next((p for p in available if p["name"].startswith("GE-Proton")), available[0]) if recipe else available[0]
+    fallback = next((p for p in available if community.is_build(p)), available[0]) if recipe else available[0]
     return fallback, "recipe_fallback" if recipe else "newest"
 
 

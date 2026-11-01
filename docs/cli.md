@@ -369,12 +369,15 @@ The cache retains the complete Deck `configuration`, including unknown keys, and
 the two Steam Play maps exactly as parsed (key names normalized to lowercase).
 The Deck profile wins over an app-mapping override. No real Deck appinfo was inspected.
 
-Selection precedence is installed exact recipe pin, explicit user override (or
-the game's saved pre-takeover Steam tool), then (with `prefer_community_fixes` on)
+Selection precedence is a usable explicit user override (or
+the game's saved pre-takeover Steam tool), then an installed exact recipe pin,
+then (with `prefer_community_fixes` on)
 the newest installed GE-Proton/UMU-Proton containing that game's community fix,
 then Valve recommendation for recipe-less
 games, then the existing fallback. A recipe without an installed pin retains its
-GE/newest fallback and does not use Valve metadata when no community build wins.
+GE/UMU family fallback and does not use Valve metadata when no community build wins.
+It chooses the newest installed GE/UMU family build, falling back to any installed
+Proton only if that family is absent. A usable override wins over recipe pins too.
 Reasons are `pinned`, `user_override`, `community_fix`, `valve_recommended`,
 `recipe_fallback`, or `newest`.
 `proton-experimental` selects `Proton - Experimental`; `proton-stable` selects the

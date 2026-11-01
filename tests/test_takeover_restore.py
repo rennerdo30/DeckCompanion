@@ -91,7 +91,7 @@ def test_valve_version_suffixes_and_mapping_are_logged(paths, monkeypatch, runti
     available = steam.proton(paths)
     pinned, pinned_reason = launch.select_proton(available, {"runtime": {"proton": "GE-Proton11-11"}},
                                                override=expected, valve=runtime)
-    assert pinned["name"] == "GE-Proton11-11" and pinned_reason == "pinned"
+    assert pinned["name"] == expected and pinned_reason == "user_override"
     chosen, chosen_reason = launch.select_proton(available, {}, override="GE-Proton11-11", valve=runtime)
     assert chosen["name"] == "GE-Proton11-11" and chosen_reason == "user_override"
     fallback, fallback_reason = launch.select_proton([p for p in available if p["name"].startswith("GE-")], {}, valve=runtime)

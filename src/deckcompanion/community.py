@@ -26,9 +26,13 @@ def scan(root, kind):
     return sorted(p.stem for p in directory.glob("*.py") if p.is_file() and valid_id(p.stem, kind))
 
 
+def is_build(build):
+    return re.match(r"^(?:GE-Proton|UMU-Proton|Proton-.*-GE)", build["name"], re.I) is not None
+
+
 def bundled(paths, build):
     root = Path(build["path"]).resolve()
-    if not re.match(r"^(?:GE-Proton|UMU-Proton|Proton-.*-GE)", build["name"], re.I):
+    if not is_build(build):
         return {"steam": [], "umu": []}
     fixes = root / "protonfixes"
     # Directory timestamps detect added/removed fixes; build identity detects replacements.

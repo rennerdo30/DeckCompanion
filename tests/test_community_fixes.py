@@ -68,14 +68,31 @@ def test_explicit_override_wins_and_reports_actual_fix(setup_game, winner, fixed
     assert result["community_fix_source"] == (winner if fixed else None)
 
 
-def test_recipe_pin_wins_over_override_and_community(setup_game, monkeypatch):
+def test_override_wins_recipe_pin_and_auto_restores_pin(setup_game, monkeypatch):
     paths = setup_game
     build(paths, "GE-Proton10-9", "42")
     invoke(paths, "game-option", "42", "--proton", "GE-Proton10-9")
     monkeypatch.setattr(recipes, "load", lambda *a: {"version": "1", "runtime": {"proton": "Proton 11.0"}})
     result = invoke(paths, "game", "42")
+    assert result["proton"] == {"name": "GE-Proton10-9", "reason": "user_override"}
+    assert result["community_fix"] == "applied"
+    result = invoke(paths, "game-option", "42", "--proton", "auto")
     assert result["proton"] == {"name": "Proton 11.0", "reason": "pinned"}
     assert result["community_fix"] is None and result["community_fix_source"] is None
+
+
+@pytest.mark.parametrize("name", ["GE-Proton10-9", "UMU-Proton10-2", "Proton-9.0-GE-1"])
+def test_missing_recipe_pin_stays_in_community_family(setup_game, monkeypatch, name):
+    paths = setup_game
+    build(paths, name)
+    monkeypatch.setattr(recipes, "load", lambda *a: {"version": "1", "runtime": {"proton": "GE-Proton99-1"}})
+    result = invoke(paths, "game", "42")
+    assert result["proton"] == {"name": name, "reason": "recipe_fallback"}
+    assert result["community_fix"] is None
+    build(paths, name, "42")
+    result = invoke(paths, "game", "42")
+    assert result["proton"] == {"name": name, "reason": "community_fix"}
+    assert result["community_fix"] == "applied"
 
 
 def test_saved_steam_override_is_preserved(setup_game):

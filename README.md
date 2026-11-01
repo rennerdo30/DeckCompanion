@@ -135,8 +135,8 @@ All roots can be overridden for tests. See [CLI contract](docs/cli.md),
 
 ## How fixes work
 
-Known games automatically get their bundled community fix: after recipe pins and
-user Proton choices, DeckCompanion picks the newest installed GE-Proton/UMU-Proton
+Known games automatically get their bundled community fix: after user Proton
+choices and installed recipe pins, DeckCompanion picks the newest installed GE-Proton/UMU-Proton
 that contains that game's `protonfixes/gamefixes-steam/<appid>.py` (or
 `gamefixes-umu/<umu-id>.py`). Discovery works offline and caches build paths and
 directory timestamps; `default.py` is not a per-game fix. The independent content
@@ -144,7 +144,10 @@ channel can also carry fix IDs before GE is installed. If only that index knows
 the fix, Valve's choice stays selected and game JSON reports
 `community_fix: "available_not_installed"`. Installing a matching GE build makes it
 eligible on the next query/launch. `settings --set prefer_community_fixes=off`
-turns off automatic preference; explicit pins and overrides always win. No runtime
+turns off automatic preference; usable user overrides win over recipe pins too.
+A recipe whose exact pin is missing falls back within installed GE/UMU builds,
+preferring one containing its community fix, rather than using Valve's recommendation.
+No runtime
 download or upstream request is added to launch. Game and splash JSON report the
 fix status and selected build name; actual upstream execution needs a launch check.
 
