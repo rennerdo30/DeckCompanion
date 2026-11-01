@@ -132,8 +132,10 @@ export default definePlugin(() => ({
   name: "DeckCompanion",
   titleView: <div className={staticClasses.Title} style={{ fontSize: 20 }}>DeckCompanion</div>,
   content: <Content />,
-  icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <rect x="2" y="6" width="20" height="13" rx="5" />
-    <path d="M5 12h6m-3-3v6" /><circle cx="16" cy="11" r="1" /><circle cx="19" cy="14" r="1" />
+  // Sized like Decky's other icons (1em); without a size the SVG fills the whole tab.
+  icon: <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round" style={{ display: "block" }}>
+    <path d="M7 6h10a5 5 0 0 1 5 5v2.5a3.5 3.5 0 0 1-6.2 2.2L14.6 14H9.4l-1.2 1.7A3.5 3.5 0 0 1 2 13.5V11a5 5 0 0 1 5-5z" />
+    <path d="M9.5 10.5l1.8 1.8 3.2-3.3" />
   </svg>
 }));
