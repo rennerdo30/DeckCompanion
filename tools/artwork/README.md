@@ -1,0 +1,1 @@
+Steam library artwork. Regenerate: `python tools/artwork/make_art.py <fonts dir with Inter 4.1 ExtraBold/SemiBold> assets/logo/deckcompanion-icon.svg assets/steam`, then render the SVGs with `godot --headless --script tools/artwork/render_all.gd -- assets/steam`. Text is converted to paths with fontTools; Inter is OFL-1.1 (https://github.com/rsms/inter).

@@ -6,3 +6,7 @@ are unchanged from the prototype. Its complete license is in `vdf/LICENSE`.
 
 No umu-launcher code is included. protonfixes APIs are called at runtime from
 the user's GE-Proton installation; no protonfixes source is vendored.
+
+## Inter (artwork lettering)
+
+The wordmark in `assets/steam/` is lettering converted to outlines from Inter 4.1 by Rasmus Andersson, SIL Open Font License 1.1 (https://github.com/rsms/inter). No font files are distributed.
