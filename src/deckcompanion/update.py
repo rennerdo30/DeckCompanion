@@ -139,6 +139,15 @@ def update(paths):
         runtime = umu.install(paths)
     except Exception as exc:
         runtime = {"installed": False, "error": str(exc)}
-    return {"engine": {"current": current(paths), "available": available, "updated": updated},
+    from . import takeover, steam
+    from .common import locked, state, save_state
+    with locked(paths):
+        data = state(paths)
+        takeover.reconcile(paths, data, uninstall=data.get("uninstalling", False))
+        steam.prune_pending(paths, data)
+        save_state(paths, data)
+        pending = steam.has_pending(data)
+    return {"steam_changes_pending": pending,
+            "engine": {"current": current(paths), "available": available, "updated": updated},
             "index": {"updated": fetched, "fetched_at": index.get("fetched_at") if index else None},
             "proton": proton.sync(paths), "umu": runtime}

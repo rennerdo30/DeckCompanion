@@ -55,7 +55,7 @@ static func parse_response(raw: String, exit_code: int, command: String) -> Dict
 			if valid:
 				for game in data.games:
 					if not valid_game(game): valid = false
-		"game", "enable", "disable", "mod":
+		"game", "enable", "disable", "mod", "game-option":
 			valid = valid_game(data)
 			if command == "game": valid = valid and data.get("notes") is String and data.get("log_tail") is Array
 			if data.get("log_tail") is Array:
@@ -177,6 +177,15 @@ func mock_response(command: String, args: Array = []) -> Dictionary:
 	if scenario == "offline" and command == "update": return fixture("offline")
 	if command == "games": return {"games": [] if scenario == "empty" else games.duplicate(true)}
 	if command == "update": return fixture("update")
+	if command == "game-option":
+		for game in games:
+			if args.is_empty() or game.appid != args[0]: continue
+			for i in range(1,args.size()-1):
+				if args[i] == "--takeover": game.takeover = "on" if args[i+1] == "on" else "excluded"
+				if args[i] == "--proton":
+					game.proton = {"name": game.get("proton",{}).get("name","GE-Proton11-11") if args[i+1] == "auto" else args[i+1], "reason": "newest" if args[i+1] == "auto" else "user_override"}
+			return game.duplicate(true)
+		return failure("NOT_FOUND", "This game is no longer installed. Refresh your library.")
 	if command == "default":
 		default_pending = null if (args[0] == "--on") == default_tool else ("default_on" if args[0] == "--on" else "default_off")
 		return mock_response("status")

@@ -22,7 +22,7 @@ func focus_node(node: Node, id: String) -> Control:
 func run(test: SceneTree, ui: Node) -> void:
 	ui._switch_tab(2)
 	await test.create_timer(0.15).timeout
-	for spec in [["splash_toggle","Launch splash"],["default","Default for all games"],
+	for spec in [["splash_toggle","Launch splash"],["default","Default for new games"],["takeover_all","Use DeckCompanion for all games"],
 		["show_games_without_recipe","Show games without a recipe"],
 		["check_updates_on_start","Check when DeckCompanion opens"]]:
 		var button: Control = test.control(ui,spec[0])

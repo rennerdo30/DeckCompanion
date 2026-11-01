@@ -212,6 +212,7 @@ func _read_after_frame() -> void:
 		if auto_quit: get_tree().quit(1)
 		return
 	set_payload(parsed)
+	if parallel: _become_gamescope_overlay()
 	ResourceLoader.load_threaded_request("res://icon.svg")
 	_capture_if_requested()
 
@@ -340,3 +341,18 @@ func _capture_if_requested() -> void:
 		await get_tree().create_timer(0.6).timeout
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png(arg.trim_prefix("--splash-capture="))
+
+## In parallel mode the game's first (empty, black) window would cover the splash.
+## gamescope composites windows marked GAMESCOPE_EXTERNAL_OVERLAY above the game (as it
+## does for its performance overlay), so the splash stays visible while the game loads.
+## Overlay windows get no input, so the parallel splash closes on its timer.
+func _become_gamescope_overlay() -> void:
+	if OS.get_name() != "Linux" or DisplayServer.get_name() != "X11": return
+	var window_id := DisplayServer.window_get_native_handle(DisplayServer.WINDOW_HANDLE)
+	if window_id == 0: return
+	var output: Array = []
+	var code := OS.execute("xprop", ["-id", str(window_id), "-f", "GAMESCOPE_EXTERNAL_OVERLAY", "32c", "-set", "GAMESCOPE_EXTERNAL_OVERLAY", "1"], output, true)
+	print("splash overlay: xprop exit ", code, " window ", window_id, " ", "".join(output).strip_edges())
+	skip_button.hide()
+	hold_button.hide()
+	footer_note.text = "Your game is loading behind this screen."

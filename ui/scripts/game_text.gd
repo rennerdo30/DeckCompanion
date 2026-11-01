@@ -9,7 +9,7 @@ static func fix(game: Dictionary) -> String:
 static func proton(game: Dictionary) -> String:
 	var build: Variant = game.get("proton")
 	if not build is Dictionary: return "Proton · Not reported by engine"
-	var reasons := {"pinned": "recipe pin", "recipe_fallback": "recipe fallback", "newest": "newest installed"}
+	var reasons := {"pinned": "recipe pin", "recipe_fallback": "recipe fallback", "newest": "newest installed", "valve_recommended": "Valve recommendation", "user_override": "your choice"}
 	return str(build.get("name", "Unknown Proton")) + " · " + str(reasons.get(build.get("reason"), "not reported"))
 
 static func version(value: Variant) -> String:

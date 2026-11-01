@@ -372,11 +372,11 @@ func _completed(command: String, data: Dictionary) -> void:
 				status = data
 				notice = "Change saved. Apply when you’re ready."
 			"game": selected = data
-			"enable", "disable", "mod":
+			"enable", "disable", "mod", "game-option":
 				selected.merge(data,true)
 				for i in games.size():
 					if games[i].appid == data.appid: games[i] = data
-				notice = Text.mod_message(data) if command == "mod" else "Change saved. Apply when you’re ready."
+				notice = Text.mod_message(data) if command == "mod" else ("Saved. Used from the next launch." if command == "game-option" and "--proton" in failed_args else "Change saved. Apply when you’re ready.")
 				_request("status")
 				return
 			"update":
@@ -730,9 +730,16 @@ func _detail_screen() -> void:
 		var remove_row := _setting_row(setup,"Non-Steam game","Runs through umu-launcher with its own save prefix.")
 		_chip("Remove game",func(): modal_focus = get_viewport().gui_get_focus_owner(); remove_dialog.popup_centered(); remove_dialog.get_cancel_button().grab_focus(),remove_row,"remove-game",false,WARN).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	else:
-		var toggle_row := _setting_row(setup,"Use DeckCompanion fixes","Applies this game's recipe at launch." if selected.has_recipe else "No recipe yet. Steam launches this game normally.")
-		_state_switch(toggle_row,"toggle",enabled,_toggle_game,selected.has_recipe)
-	_setting_row(setup,"Proton",Text.proton(selected))
+		var takeover: String = str(selected.get("takeover","n/a"))
+		if takeover != "n/a":
+			var before: Variant = selected.get("previous_mapping")
+			var hint := "Steam's own choice before: " + str(before) if before != null else "DeckCompanion picks Proton, fixes and mods."
+			var takeover_row := _setting_row(setup,"Run through DeckCompanion",hint)
+			_state_switch(takeover_row,"takeover",takeover == "on",func(): _request("game-option",[selected.appid,"--takeover","off" if takeover == "on" else "on"]))
+		if selected.has_recipe:
+			var toggle_row := _setting_row(setup,"Use DeckCompanion fixes","Applies this game's recipe and mods at launch.")
+			_state_switch(toggle_row,"toggle",enabled,_toggle_game,true)
+	_proton_picker(setup)
 	var mods := _card(left,"Mods")
 	if selected.mods.is_empty(): _paragraph(mods,"No optional mods in this recipe." if selected.has_recipe else "No mods for this game yet.")
 	for mod in selected.mods:
@@ -759,6 +766,29 @@ func _detail_screen() -> void:
 	log_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	log_view.add_child(log_text)
 
+## Per-game Proton choice (DC-27): Automatic or any installed build.
+func _proton_picker(parent: Node) -> void:
+	var build: Variant = selected.get("proton")
+	var reason: String = str(build.get("reason","")) if build is Dictionary else ""
+	var valve: Variant = selected.get("valve_recommendation")
+	var hint := Text.proton(selected) + ("  ·  Valve suggests " + str(valve) if valve != null and reason != "valve_recommended" else "")
+	var row := _setting_row(parent,"Proton",hint)
+	var picker := OptionButton.new()
+	picker.custom_minimum_size = Vector2(250,42)
+	picker.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	picker.add_theme_font_size_override("font_size",17)
+	picker.get_popup().add_theme_font_size_override("font_size",19)
+	picker.set_meta("focus_id","proton_pick")
+	picker.add_item("Automatic")
+	var names: Array = status.get("proton",[]).map(func(p): return str(p.get("name","")))
+	for name in names: picker.add_item(name)
+	picker.selected = names.find(str(build.get("name",""))) + 1 if reason == "user_override" and build is Dictionary else 0
+	picker.item_selected.connect(func(index): _request("game-option",[selected.appid,"--proton","auto" if index == 0 else names[index-1]]))
+	picker.focus_entered.connect(func(): last_focus = "proton_pick")
+	picker.disabled = backend.busy or selected.get("kind") == "non_steam" and names.is_empty()
+	row.add_child(picker)
+	if not picker.disabled: controls.append(picker)
+
 func _updates_screen() -> void:
 	var column := _scroll_column()
 	_update_status(column)
@@ -777,6 +807,10 @@ func _scroll_column() -> VBoxContainer:
 func _settings_screen() -> void:
 	var columns := _two_columns()
 	var general := _card(columns[0],"General")
+	var counts: Dictionary = status.get("takeover_counts",{})
+	var takeover_on: bool = settings.get("takeover_all",true)
+	var takeover_row := _setting_row(general,"Use DeckCompanion for all games","Every installed Windows game, including ones with their own Steam setting. Turning it off restores each game's previous tool." + (" (%d of %d games)" % [int(counts.get("on",0)),int(counts.get("eligible",0))] if counts.has("eligible") else ""))
+	_state_switch(takeover_row,"takeover_all",takeover_on,func(): _request("settings",["--set","takeover_all="+("off" if takeover_on else "on")]),not settings.is_empty())
 	var splash_enabled: bool = settings.get("splash",true)
 	var splash_row := _setting_row(general,"Launch splash","Shows Proton, fixes and mods before a game starts. A skips, Y holds.")
 	_state_switch(splash_row,"splash_toggle",splash_enabled,func(): _request("settings",["--splash","off" if splash_enabled else "on"]),not settings.is_empty())
@@ -796,7 +830,7 @@ func _settings_screen() -> void:
 	var is_default: bool = status.get("default_tool",false)
 	if pending_actions.has("default_on"): is_default = true
 	elif pending_actions.has("default_off"): is_default = false
-	var defaults := _setting_row(general,"Default for all games","Windows games without their own setting run through DeckCompanion. Apply restarts Steam.")
+	var defaults := _setting_row(general,"Default for new games","Steam's default tool for games installed later. Apply restarts Steam.")
 	_state_switch(defaults,"default",is_default,func(): _request("default",["--off" if is_default else "--on"]))
 	var library := _card(columns[0],"Library")
 	_setting_toggle(library,"show_games_without_recipe","Show games without a recipe","Keep every installed game in the library.")

@@ -1,6 +1,9 @@
 config_version=5
 
 [application]
+
+boot_splash/show_image=false
+boot_splash/bg_color=Color(0.039, 0.071, 0.094, 1)
 config/name="DeckCompanion"
 run/main_scene="res://boot.tscn"
 config/icon="res://icon.svg"

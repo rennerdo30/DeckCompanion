@@ -16,7 +16,7 @@ HARD_TIMEOUT = 130
 # 2026-11-01). Off = the old behaviour: show the splash first, then start the game.
 DEFAULTS = {"splash": True, "splash_seconds": 4.0, "splash_parallel": True,
             "show_games_without_recipe": True, "check_updates_on_start": True,
-            "auto_install_ge": True, "cleanup_old_ge": True}
+            "auto_install_ge": True, "cleanup_old_ge": True, "takeover_all": True}
 
 
 def settings(data):

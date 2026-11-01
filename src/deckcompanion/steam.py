@@ -386,6 +386,8 @@ def apply(paths, restart=False):
 def prepare_apply(paths):
     """Read/serialize before shutdown so the respawn window only contains disk writes."""
     data = state(paths)
+    from . import takeover
+    takeover.reconcile(paths, data, uninstall=data.get("uninstalling", False))
     doc = read_vdf(mapping_path(paths))
     target = mappings(doc)
     changes, cleanup = [], []
@@ -408,7 +410,7 @@ def prepare_apply(paths):
         if not pending:
             continue
         if pending == "enable":
-            if not game.get("enabled"):
+            if not game.get("enabled") and not game.get("takeover_snapshot"):
                 game["previous_mapping"] = target.get(ident)
             target[ident] = {"name": "DeckCompanion", "config": "", "priority": "250"}
         else:
@@ -419,6 +421,8 @@ def prepare_apply(paths):
                 else:
                     target[ident] = previous
             cleanup.append(paths.config / "localfixes" / f"{ident}.py")
+            game["takeover_managed"] = False
+            game["takeover_snapshot"] = False
         game.update(enabled=pending == "enable", pending=None)
         changes.append({"appid": ident, "action": pending})
     writes = []

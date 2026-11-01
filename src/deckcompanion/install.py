@@ -81,6 +81,7 @@ def install(paths, source):
     if icon:
         owned_write(paths.data / "assets/icon.png", icon.read_bytes())
     data = state(paths)
+    data.pop("uninstalling", None)
     if has_ui:
         ui_stub = stub[:stub.index("from deckcompanion.cli import main")] + 'os.execv(str(root / "bin/deckcompanion-ui"), [str(root / "bin/deckcompanion-ui"), *sys.argv[1:]])\n'
         owned_write(paths.data / "bin/deckcompanion-ui", ui_stub, 0o755)
@@ -96,6 +97,8 @@ def install(paths, source):
     for ident in set(steam.installed(paths)) | set(data["games"]):
         content.immediate(installed_paths, ident, recipes.load(installed_paths, ident),
                           data["games"].setdefault(ident, {}), budget)
+    from . import takeover
+    takeover.reconcile(paths, data)
     steam.prune_pending(paths, data)
     save_state(paths, data)
     pending = steam.has_pending(data)
@@ -107,6 +110,7 @@ def install(paths, source):
 def uninstall(paths):
     steam.require_closed()
     data = state(paths)
+    data["uninstalling"] = True
     doc = steam.read_vdf(steam.mapping_path(paths))
     for ident, mapping in steam.mappings(doc).items():
         if mapping.get("name") == "DeckCompanion" and ident.isdigit() and ident != "0":

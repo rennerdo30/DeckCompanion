@@ -4,24 +4,25 @@ from collections import deque
 import json
 import math
 import sys
-from . import __version__, content, recipes, steam
+from . import __version__, appinfo, content, recipes, steam, takeover
 from .common import Error, Paths, app_id, locked, read_json, state, save_state
 
 
-def game(paths, ident):
-    from .launch import select_proton
+def game(paths, ident, discovery=None, metadata=None, available=None):
+    from .launch import selection
     ident = app_id(ident)
     from . import nonsteam
     registered = next((g for g in state(paths).get("non_steam", {}).values()
                        if g["appid"] == ident and not g.get("removed")), None)
     if registered:
         return nonsteam.game(paths, registered)
-    entry = steam.installed(paths).get(ident)
+    discovery = takeover.discover(paths) if discovery is None else discovery
+    entry = discovery[0].get(ident)
     recipe = recipes.load(paths, ident)
     saved = state(paths)["games"].get(ident, {})
     prefix, game_root = steam.content_roots(paths, ident)
     manifest = read_json(paths.data / "manifests" / f"{ident}.json", {"mods": {}})
-    selected, reason = select_proton(steam.proton(paths), recipe or {})
+    selected, reason, valve = selection(paths, ident, recipe or {}, saved, available, metadata)
     mods = []
     for mod in (recipe or {}).get("mods", []):
         enabled = saved.get("mods", {}).get(mod["id"], mod.get("enabled", True))
@@ -35,6 +36,8 @@ def game(paths, ident):
             "pending": saved.get("pending"), "recipe_version": recipe["version"] if recipe else None,
             "mods": mods, "last_launch": saved.get("last_launch"), "art": steam.artwork(paths, ident),
             "last_played": steam.last_played(paths).get(ident),
+            **({"kind": entry["kind"]} if entry and "kind" in entry else {}),
+            **takeover.fields(state(paths), ident, discovery[1]), "valve_recommendation": valve,
             "proton": {"name": selected["name"], "reason": reason} if selected else None}
 
 
@@ -60,11 +63,14 @@ def parser():
     runtime = commands.add_parser("umu")
     runtime.add_argument("action", choices=("install",))
     runtime.add_argument("--json", action="store_true")
-    for name in ("games", "game", "enable", "disable", "mod", "default", "apply", "status", "update", "rollback", "settings"):
+    for name in ("games", "game", "game-option", "enable", "disable", "mod", "default", "apply", "status", "update", "rollback", "settings"):
         sub = commands.add_parser(name)
         sub.add_argument("--json", action="store_true")
-        if name in ("game", "enable", "disable", "mod"):
+        if name in ("game", "game-option", "enable", "disable", "mod"):
             sub.add_argument("appid", type=app_id)
+        if name == "game-option":
+            sub.add_argument("--takeover", choices=("on", "off"))
+            sub.add_argument("--proton", help="Installed build/tool name, or auto to clear the override")
         if name == "mod":
             sub.add_argument("mod_id")
         if name in ("mod", "default"):
@@ -154,6 +160,8 @@ def execute(args, paths):
             options["splash_seconds"] = max(1.0, min(MAX_SECONDS, args.splash_seconds))
         if args.splash is not None or args.splash_seconds is not None or args.set:
             data.setdefault("settings", {}).update(options)
+            if any(item.partition("=")[0] == "takeover_all" for item in args.set):
+                takeover.reconcile(paths, data, uninstall=data.get("uninstalling", False))
             save_state(paths, data)
         return options
     if name in ("install", "uninstall"):
@@ -163,9 +171,12 @@ def execute(args, paths):
         from . import update
         return getattr(update, name)(paths)
     if name == "games":
-        identifiers = set(steam.installed(paths)) | {i for i in recipes.ids(paths) if i.isdigit()} | set(data["games"])
+        discovery = takeover.discover(paths)
+        identifiers = set(discovery[0]) | {i for i in recipes.ids(paths) if i.isdigit()} | set(data["games"])
+        metadata, available = appinfo.load(paths), steam.proton(paths)
         from . import nonsteam
-        return {"games": [game(paths, ident) for ident in sorted(identifiers, key=int)] +
+        registered_ids = {g["appid"] for g in data.get("non_steam", {}).values()}
+        return {"games": [game(paths, ident, discovery, metadata, available) for ident in sorted(identifiers - registered_ids, key=int)] +
                 [nonsteam.game(paths, saved) for saved in data.get("non_steam", {}).values() if not saved.get("removed")]}
     if name == "game":
         result = game(paths, args.appid)
@@ -180,6 +191,17 @@ def execute(args, paths):
         else:
             result["log_tail"] = []
         return result
+    if name == "game-option":
+        saved = data["games"].setdefault(args.appid, {})
+        if args.takeover is not None:
+            saved["takeover_excluded"] = args.takeover == "off"
+            if args.takeover == "off" and saved.get("enabled"):
+                saved["pending"] = "disable"
+        if args.proton is not None:
+            saved["proton_override"] = None if args.proton == "auto" else args.proton
+        takeover.reconcile(paths, data, uninstall=data.get("uninstalling", False))
+        save_state(paths, data)
+        return game(paths, args.appid)
     if name in ("enable", "disable", "mod"):
         from . import nonsteam
         registered = next((g for g in data.get("non_steam", {}).values()
@@ -201,6 +223,7 @@ def execute(args, paths):
             saved.setdefault("mods", {})[args.mod_id] = args.on
         else:
             saved["pending"] = name
+            saved["takeover_excluded"] = name == "disable"
         changed = set()
         if name in ("enable", "mod"):
             changed = content.immediate(paths, args.appid, recipes.load(paths, args.appid), saved)
@@ -216,6 +239,7 @@ def execute(args, paths):
         data["default_pending"] = "default_on" if args.on else "default_off"
         save_state(paths, data)
     if name in ("status", "default"):
+        _, eligible = takeover.discover(paths)
         pending = [{"appid": ident, "action": item["pending"]} for ident, item in data["games"].items() if item.get("pending")]
         pending += [{"slug": g["slug"], "action": g["pending"]} for g in data.get("non_steam", {}).values() if g.get("pending")]
         if data.get("default_pending"):
@@ -223,6 +247,8 @@ def execute(args, paths):
         return {"version": __version__, "install_path": str(paths.data), "steam_running": steam.running(),
                 "default_tool": steam.mappings(steam.read_vdf(steam.mapping_path(paths))).get("0", {}).get("name") == "DeckCompanion",
                 "pending": pending,
+                "takeover_all": data.get("settings", {}).get("takeover_all", True),
+                "takeover_counts": takeover.counts(data, eligible),
                 "proton": steam.proton(paths),
                 "last_apply": read_json(paths.data / "logs/apply-last.json")}
     raise Error("unknown_command", name)
@@ -240,9 +266,16 @@ def main(argv=None):
             from .nonsteam import run
             run(paths, args.slug)
             return 0
-        if args.command == "apply" and not steam.has_pending(state(paths)):
-            print(json.dumps({"applied": [], "steam_restarted": False}))
-            return 0  # Installers may call apply unconditionally after an engine-only update.
+        if args.command == "apply":
+            with locked(paths):
+                data = state(paths)
+                takeover.reconcile(paths, data, uninstall=data.get("uninstalling", False))
+                steam.prune_pending(paths, data)
+                save_state(paths, data)
+                pending = steam.has_pending(data)
+            if not pending:
+                print(json.dumps({"applied": [], "steam_restarted": False}))
+                return 0
         if args.command == "apply-helper":
             from .apply_helper import apply_helper
             result = apply_helper(paths, args.game_mode)
