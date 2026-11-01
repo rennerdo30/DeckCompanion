@@ -21,7 +21,7 @@ var decky_dialog: ConfirmationDialog
 var launcher_backend: Node
 var launchers_data: Array = []
 var launcher_poll := 0.0
-const UI_VERSION := "0.4.5"
+const UI_VERSION := "0.4.6"
 # Design tokens (shared with the logo and Steam artwork palette).
 var INK: Color = Color("e7f1f4")
 var MUTED: Color = Color("8fa6b2")
