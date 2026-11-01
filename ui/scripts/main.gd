@@ -605,7 +605,11 @@ func _request_decky_secret(action: String) -> void:
 	if action == "install": decky_pending_password = ""
 	notice = "Setting your Deck password…" if action == "set-password" else "Installing Decky Loader…"
 	decky_backend.set_meta("action",action)
-	decky_backend.request("decky",[action,"--password-file",path])
+	if not decky_backend.request("decky",[action,"--password-file",path]):
+		# Not accepted (busy): never leave the password behind on disk.
+		DirAccess.remove_absolute(path)
+		decky_pending_password = ""
+		notice = "DeckCompanion is busy. Try again in a moment."
 	_render()
 
 ## Engine instructions may be a list or one string; never iterate a string per character.
