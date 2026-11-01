@@ -11,19 +11,119 @@ import time
 import uuid
 from urllib.parse import quote
 from . import archives, net, recipes, steam
-from .common import Error, locked, now, read_json, state, write_json
+from .common import Error, locked, now, read_json, save_state, state, write_json
 from .splash import settings
 
 API = "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases"
 LIMIT = 2 * 1024**3
 EXPANSION = 4 * 1024**3
+CACHE_SECONDS = 6 * 3600
 
 
 def canonical(name):
     name = re.sub(r"-x86_64$", "", name)
-    if not re.fullmatch(r"GE-Proton\d+(?:[.-]\d+)+(?:-[A-Za-z0-9.]+)?", name):
+    if not re.fullmatch(r"(?:GE-Proton\d+(?:[.-]\d+)+(?:-[A-Za-z0-9.]+)?|Proton-\d+(?:[.-]\d+)+-GE(?:-[A-Za-z0-9.]+)?)", name):
         raise Error("invalid_proton", "Expected a versioned GE-Proton build name")
     return name
+
+
+def release_asset(release):
+    """Share archive selection between discovery and the verified installer."""
+    tag = canonical(release["tag_name"])
+    if release.get("draft") or release.get("prerelease"):
+        raise Error("invalid_release", "Expected a published stable GE release")
+    asset = next(a for a in release["assets"] if a["name"] in
+                 (tag + "-x86_64.tar.gz", tag + ".tar.gz"))
+    if (type(asset["size"]) is not int or not 0 < asset["size"] <= LIMIT or
+            not asset["browser_download_url"].startswith("https://")):
+        raise Error("invalid_release", "GE archive must use HTTPS and fit the 2 GiB limit")
+    return tag, asset
+
+
+def archive_digest(asset):
+    algorithm, _, checksum = (asset.get("digest") or "").partition(":")
+    return checksum if algorithm == "sha256" and re.fullmatch(r"[a-f0-9]{64}", checksum) else None
+
+
+def available(paths, page=1, per_page=30):
+    """One GitHub page per call, six-hour cache, two-second network budget."""
+    if type(page) is not int or page < 1 or type(per_page) is not int or not 1 <= per_page <= 100:
+        raise Error("invalid_arguments", "Use page >= 1 and per-page between 1 and 100")
+    target = paths.cache / "ge" / f"releases-{page}-{per_page}.json"
+    try:
+        cached = read_json(target, {})
+        if (not isinstance(cached, dict) or not isinstance(cached.get("builds"), list) or
+                not isinstance(cached.get("fetched"), (int, float))):
+            cached = {}
+    except (OSError, ValueError):
+        cached = {}
+    result, from_cache, stale, error = cached, True, False, None
+    if not cached or not 0 <= time.time() - cached.get("fetched", 0) < CACHE_SECONDS:
+        # Each reader gets its own response path; concurrent UI calls cannot mix pages.
+        response = target.with_name(f".releases-{uuid.uuid4().hex}.json")
+        try:
+            net.fetch(f"{API}?per_page={per_page}&page={page}", response, net.Budget(2), max_bytes=8 * 1024**2)
+            releases = read_json(response)
+            if not isinstance(releases, list):
+                raise Error("invalid_release", "Expected a GitHub releases array")
+            builds = []
+            for release in releases:
+                try:
+                    name, asset = release_asset(release)
+                    digest = archive_digest(asset)
+                    checksum_asset = next((a for a in release["assets"] if a["name"] ==
+                        asset["name"].removesuffix(".tar.gz") + ".sha512sum" and
+                        a.get("browser_download_url", "").startswith("https://")), None)
+                    # Every listed build has a verification source the installer supports.
+                    if not digest and not checksum_asset:
+                        continue
+                    builds.append({"name": name, "published_at": release.get("published_at"),
+                                   "size": asset["size"], "digest_available": bool(digest),
+                                   "checksum_algorithm": "sha256" if digest else "sha512"})
+                except (Error, KeyError, TypeError, StopIteration):
+                    continue  # Unsupported architectures/tags are not install choices.
+            builds.sort(key=lambda b: b["published_at"] or "", reverse=True)
+            result = {"builds": builds, "fetched": time.time(), "fetched_at": now(),
+                      "has_more": len(releases) == per_page}
+            write_json(target, result)
+            from_cache = False
+        except (Error, OSError, ValueError, TypeError) as exc:
+            if not cached:
+                raise Error("ge_available_failed", f"Cannot list GE-Proton releases: {exc}") from exc
+            stale, error = True, str(exc)
+        finally:
+            response.unlink(missing_ok=True)
+    installed = {canonical_or_name(b["name"]) for b in steam.proton(paths)}
+    has_more = result.get("has_more", False)
+    return {"builds": [dict(b, installed=b["name"] in installed) for b in result.get("builds", [])],
+            "source": "GloriousEggroll/proton-ge-custom", "page": page, "per_page": per_page,
+            "has_more": has_more, "next_page": page + 1 if has_more else None,
+            "fetched_at": result.get("fetched_at"), "cached": from_cache, "stale": stale, "warning": error}
+
+
+def canonical_or_name(name):
+    try:
+        return canonical(name)
+    except Error:
+        return name
+
+
+def installed_size(root):
+    """Logical bytes, without following directory/file links or Windows junctions."""
+    total = 0
+    def unreadable(exc):
+        raise exc
+    for directory, folders, files in os.walk(root, followlinks=False, onerror=unreadable):
+        folders[:] = [n for n in folders if not is_link(Path(directory) / n)]
+        for name in files:
+            path = Path(directory) / name
+            if not is_link(path):
+                total += path.stat().st_size
+    return total
+
+
+def is_link(path):
+    return path.is_symlink() or bool(getattr(path.lstat(), "st_file_attributes", 0) & 0x400)
 
 
 def wanted(paths):
@@ -34,7 +134,7 @@ def wanted(paths):
         recipe = recipes.load(paths, ident)
         runtime = (recipe or {}).get("runtime", {})
         pin = runtime.get("proton", "")
-        if pin.startswith("GE-Proton") and pin != "GE-Proton":
+        if (pin.startswith("GE-Proton") and pin != "GE-Proton") or (pin.startswith("Proton-") and "-GE" in pin):
             name = canonical(pin)
             item = result.setdefault(name, {"wanted_by": [], "sha256": runtime.get("sha256")})
             sha = runtime.get("sha256")
@@ -69,16 +169,12 @@ def metadata(paths, name=None):
         net.fetch(API + ("/tags/" + quote(name) if name else "/latest"), response,
                   net.DownloadBudget(30), max_bytes=2 * 1024**2)
         release = read_json(response)
-        tag = canonical(release["tag_name"])
-        if (name and tag != name) or release.get("draft") or release.get("prerelease"):
+        tag, asset = release_asset(release)
+        if name and tag != name:
             raise Error("invalid_release", "Unexpected GE release")
-        asset = next(a for a in release["assets"] if a["name"] in
-                     (tag + "-x86_64.tar.gz", tag + ".tar.gz"))
         size, url = asset["size"], asset["browser_download_url"]
-        if type(size) is not int or not 0 < size <= LIMIT or not url.startswith("https://"):
-            raise Error("invalid_release", "GE archive must use HTTPS and fit the 2 GiB limit")
-        algorithm, _, checksum = (asset.get("digest") or "").partition(":")
-        if algorithm != "sha256" or not re.fullmatch(r"[a-f0-9]{64}", checksum):
+        algorithm, checksum = "sha256", archive_digest(asset)
+        if not checksum:
             checksum_asset = next(a for a in release["assets"] if
                                   a["name"] == asset["name"].removesuffix(".tar.gz") + ".sha512sum")
             checksum_file = response.with_suffix(".sha512sum")
@@ -104,17 +200,14 @@ def listing(paths):
     if latest:
         pins.setdefault(latest, {"wanted_by": [], "sha256": None})["latest"] = True
     builds = {}
-    registry = read_json(paths.data / "proton-installed.json", {})
     for installed in steam.proton(paths):
-        name = installed["name"]
-        if name.startswith("GE-Proton"):
-            try:
-                name = canonical(name)
-            except Error:
-                pass
+        name = canonical_or_name(installed["name"])
         builds[name] = dict(installed, name=name, state="installed", installed=True)
-        if name in registry:
-            builds[name]["installed_bytes"] = registry[name].get("installed_bytes", 0)
+        try:
+            builds[name]["installed_bytes"] = installed_size(Path(installed["path"]))
+        except OSError:
+            builds[name]["installed_bytes"] = None
+        builds[name]["removable"] = removable_path(paths, Path(installed["path"]))
     for name, info in pins.items():
         builds.setdefault(name, {"name": name, "installed": False, "state": "wanted"}).update(info)
     for file in (paths.data / "proton-status").glob("*.json"):
@@ -130,6 +223,81 @@ def listing(paths):
                 build.update(state="failed", error=job["error"])
     return {"builds": list(builds.values()), "active": job.get("active", False), "job": job,
             "status_file": str(paths.data / "proton-job.json")}
+
+
+def removable_path(paths, target):
+    """A configured tools root must never grant access to Steam-managed depots."""
+    if (target.parent != paths.tools.resolve() or is_link(target) or
+            not re.match(r"^(GE-Proton|UMU-Proton|Proton(?:[ -]|\d))", target.name, re.I)):
+        return False
+    roots = steam.libraries(paths)
+    return not any(target.is_relative_to((lib / "steamapps/common").resolve()) for lib in roots)
+
+
+def references(paths, name, data):
+    refs = []
+    for ident in sorted(recipes.ids(paths)):
+        recipe = recipes.load(paths, ident)
+        pin = (recipe or {}).get("runtime", {}).get("proton", "")
+        if pin and canonical_or_name(pin) == name:
+            refs.append({"kind": "recipe_pin", "appid": ident, "name": recipe["name"]})
+    for ident, saved in data.get("games", {}).items():
+        override = saved.get("proton_override")
+        if override and canonical_or_name(override) == name:
+            refs.append({"kind": "game_override", "appid": ident, "name": ident})
+    return refs
+
+
+def remove(paths, name, force=False):
+    """Explicit removal may remove external tools, but never a Steam-managed depot."""
+    with locked(paths, "proton-schedule.lock"), locked(paths, "proton.lock"), locked(paths):
+        if listing(paths)["active"]:
+            raise Error("busy", "A Proton download job is already running")
+        name = canonical_or_name(name)
+        candidates = [p for p in paths.tools.glob("*") if canonical_or_name(p.name) == name and
+                      (p / "proton").is_file()]
+        if len(candidates) != 1:
+            raise Error("proton_not_removable", "Choose one installed build inside compatibilitytools.d")
+        target = candidates[0]
+        if not removable_path(paths, target) or target.resolve() != target.absolute():
+            raise Error("proton_not_removable", "Refusing a linked or Steam-managed Proton build")
+        data = state(paths)
+        refs = references(paths, name, data)
+        if refs and not force:
+            raise Error("proton_in_use", "Build is referenced; use --force to remove anyway: " +
+                        ", ".join(f"{r['kind']} {r['appid']} ({r['name']})" for r in refs))
+        if steam.proton_running(target):
+            raise Error("proton_running", "A running process uses this Proton build; close the game first")
+        # Also reuse game detection for reaper/pre-launch stages before Proton appears.
+        from .launch import selection, select_proton
+        games = set(steam.installed(paths)) | set(data.get("games", {}))
+        available_builds = steam.proton(paths)
+        for ident in games:
+            selected, _, _ = selection(paths, ident, recipes.load(paths, ident) or {},
+                                       data.get("games", {}).get(ident), available_builds)
+            if selected and Path(selected["path"]).resolve() == target.resolve() and steam.game_running(ident):
+                raise Error("proton_running", f"Game {ident} may be using this build; close it first")
+        for game in data.get("non_steam", {}).values():
+            if game.get("removed"):
+                continue
+            selected, _ = select_proton(available_builds, recipes.load(paths, game["umu_id"]) or {})
+            if selected and Path(selected["path"]).resolve() == target.resolve() and steam.game_running(game["appid"]):
+                raise Error("proton_running", f"Game {game['appid']} may be using this build; close it first")
+        removed_at = now()
+        # Journal intent first, so interrupted removals remain visible.
+        removals = data.setdefault("proton_removals", {})
+        removals[name] = {"path": str(target), "removed_at": removed_at, "state": "removing",
+                          "forced": bool(force), "references": refs}
+        save_state(paths, data)
+        shutil.rmtree(target)  # Unlinks nested symlinks/junctions without traversing their targets.
+        registry = read_json(paths.data / "proton-installed.json", {})
+        registry.pop(name, None)
+        write_json(paths.data / "proton-installed.json", registry)
+        status_path_for_remove = paths.data / "proton-status" / (name + ".json")
+        status_path_for_remove.unlink(missing_ok=True)
+        removals[name]["state"] = "removed"
+        save_state(paths, data)
+        return dict(listing(paths), removed=[name], warnings=refs)
 
 
 def install(paths, name):
@@ -204,6 +372,8 @@ def cleanup(paths, keep):
         return removed
     with locked(paths):
         keep = set(keep) | set(wanted(paths))  # Recheck recipes after the downloads.
+        keep.update(canonical_or_name(g["proton_override"]) for g in state(paths).get("games", {}).values()
+                    if g.get("proton_override"))
         for name, receipt in list(registry.items()):
             target = paths.tools / canonical(name)
             if name in keep or target.is_symlink() or not target.is_dir():

@@ -80,6 +80,42 @@ def game_running(ident, proc_root=Path("/proc")):
     return False
 
 
+def proton_running(target, proc_root=Path("/proc")):
+    """Detect actual runtime use, including unknown/uninstalled games and umu."""
+    if not proc_root.is_dir():
+        raise Error("game_state_unknown", "Cannot check whether Proton is running")
+    target = target.resolve()
+    def within(value):
+        path = Path(os.fsdecode(value))
+        return path.is_absolute() and path.resolve().is_relative_to(target)
+    try:
+        for process in proc_root.glob("[0-9]*"):
+            try:
+                if hasattr(os, "getuid") and process.stat().st_uid != os.getuid():
+                    continue
+                # Open file/executable paths survive even if a game's preferences changed.
+                if (process / "exe").is_symlink() and (process / "exe").resolve().is_relative_to(target):
+                    return True
+                args = (process / "cmdline").read_bytes().split(b"\0")
+                if any(within(arg) for arg in args if arg):
+                    return True
+                env = (process / "environ").read_bytes().split(b"\0")
+                for entry in env:
+                    key, _, value = entry.partition(b"=")
+                    if key in (b"PROTONPATH", b"WINELOADER", b"WINESERVER", b"WINEDLLPATH",
+                               b"STEAM_COMPAT_TOOL_PATHS", b"LD_LIBRARY_PATH"):
+                        parts = [value] if key in (b"PROTONPATH", b"WINELOADER", b"WINESERVER") else value.split(os.pathsep.encode())
+                        if any(within(part) for part in parts if part):
+                            return True
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            except PermissionError as exc:
+                raise Error("game_state_unknown", "Cannot inspect a user's process; removal deferred") from exc
+    except OSError as exc:
+        raise Error("game_state_unknown", "Cannot check all Proton processes safely") from exc
+    return False
+
+
 def content_roots(paths, ident):
     entry = installed(paths).get(ident)
     roots = [Path(entry["library"])] if entry else libraries(paths)
