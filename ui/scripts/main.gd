@@ -9,7 +9,7 @@ const DragScroll = preload("res://scripts/drag_scroll.gd")
 const AddGame = preload("res://scripts/add_game.gd")
 var add_flow: RefCounted
 var remove_dialog: ConfirmationDialog
-const UI_VERSION := "0.4.1"
+const UI_VERSION := "0.4.2"
 # Design tokens (shared with the logo and Steam artwork palette).
 const INK := Color("e7f1f4")
 const MUTED := Color("8fa6b2")
