@@ -20,7 +20,7 @@ var decky_handoff: Dictionary = {}
 var launcher_backend: Node
 var launchers_data: Array = []
 var launcher_poll := 0.0
-const UI_VERSION := "0.4.4"
+const UI_VERSION := "0.4.5"
 # Design tokens (shared with the logo and Steam artwork palette).
 const INK := Color("e7f1f4")
 const MUTED := Color("8fa6b2")
@@ -1086,17 +1086,29 @@ func _update_status(column: Node) -> void:
 	engine.add_child(_label(str(status.get("version","Not connected")),24,INK))
 	var available: String = str(update.get("engine",{}).get("available","not checked"))
 	_paragraph(engine,"Available: " + available + "  ·  Steam " + ("running" if status.get("steam_running",false) else "closed"))
-	var index := _card(top,"Recipes")
+	var channels: Dictionary = status.get("channels",{})
+	var content: Dictionary = channels.get("content",{})
+	var index := _card(top,"Recipes and launchers")
 	index.get_parent().size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var raw_fetched = update.get("index",{}).get("fetched_at")
+	var raw_fetched: Variant = content.get("fetched_at", update.get("index",{}).get("fetched_at"))
 	var fetched: String = raw_fetched if raw_fetched is String else ""
+	var version: Variant = content.get("version")
+	index.add_child(_label(("Content " + str(version)) if version != null else "Built-in recipes",24,INK))
 	var age := "Not fetched yet"
 	if not fetched.is_empty():
 		var hours := maxi(0,int((Time.get_unix_time_from_system()-Time.get_unix_time_from_datetime_string(fetched))/3600))
 		age = "Fetched just now" if hours == 0 else "Fetched %s hour%s ago" % [hours,"" if hours == 1 else "s"]
-	index.add_child(_label(age,24,INK))
-	_paragraph(index,fetched if not fetched.is_empty() else "Check for updates to download the recipe index.")
+	_paragraph(index,age + "  ·  updates on its own, without a DeckCompanion release" + ("" if str(content.get("state","")) in ["","active","bundled"] else "  ·  " + str(content.state)))
 	_chip("Checking…" if update_backend.busy else "Check for updates",_check_updates,index,"check_updates",false,MINT,not update_backend.busy)
+	# Mods and runtimes follow their own upstream releases.
+	var modules := _card(column,"Mods and runtimes")
+	var mods: Dictionary = channels.get("mods",{})
+	var resolved: Dictionary = mods.get("resolved",{}) if mods.get("resolved") is Dictionary else {}
+	var mod_line := "%d mod%s tracked from their own releases" % [resolved.size(),"" if resolved.size() == 1 else "s"] if not resolved.is_empty() else "Mods resolve from their own releases on the next update check"
+	if mods.get("updated_at") is String: mod_line += "  ·  checked " + str(mods.updated_at).get_slice("T",0)
+	_setting_row(modules,"Mods",mod_line)
+	var umu: Variant = channels.get("umu",{}).get("version")
+	_setting_row(modules,"umu-launcher (non-Steam games)",("Version " + str(umu)) if umu != null else "Downloaded when you add your first non-Steam game")
 	var proton := _card(column,"Proton builds")
 	for build in proton_data.get("builds",[]):
 		var phase: String = build.get("state","wanted")
