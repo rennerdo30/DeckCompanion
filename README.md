@@ -20,6 +20,27 @@ The GPL-3.0 runtime and its LICENSE are downloaded into the user's data director
 no umu code is included in DeckCompanion's MIT source or release tarball.
 See [non-Steam commands](docs/cli.md#non-steam-windows-games). **Not verified on hardware.**
 
+## Decky Quick Access panel
+
+The optional [Decky plugin](decky-plugin/README.md) shows the current or last game's
+recipe, Proton and reason, mod states and last launch. It offers routing/mod toggles,
+installed Proton choices, a global splash toggle and **Open DeckCompanion**.
+Mapping changes stay queued until you Apply in the full app.
+
+`deckcompanion decky status --json` checks Decky Loader and its latest stable release.
+`deckcompanion decky install --json` supplies the official installer command and
+opens it in Konsole when in Desktop Mode. The official installer handles its own
+sudo prompt; DeckCompanion never asks for or stores passwords.
+
+The plugin has its own version and `decky-v<version>` release, independent of the
+engine. Use `deckcompanion decky plugin-status --json` and
+`deckcompanion decky plugin-install --json` to discover and install/update it with
+SHA256 verification from GitHub's asset digest. A user-writable `~/homebrew/plugins`
+is required. If it is root-owned, use Decky's developer **Install Plugin from ZIP**
+action with the separately released `deckcompanion-decky-<version>.zip`.
+See [CLI details](docs/cli.md#decky-loader-and-independent-plugin).
+**QAM rendering, controls and installer behavior need hardware checks.**
+
 ## Install (Desktop Mode)
 
 Open Konsole on your Steam Deck and paste this one line:

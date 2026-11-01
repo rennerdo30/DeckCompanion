@@ -62,6 +62,10 @@ def parser():
     helper.add_argument("id")
     helper.add_argument("token")
     helper.add_argument("--json", action="store_true")
+    decky = commands.add_parser("decky")
+    decky.add_argument("action", choices=("status", "install", "panel", "plugin-status", "plugin-install"))
+    decky.add_argument("--appid", type=app_id)
+    decky.add_argument("--json", action="store_true")
     add = commands.add_parser("add-game")
     add.add_argument("--exe", required=True)
     add.add_argument("--name", required=True)
@@ -137,6 +141,15 @@ def execute(args, paths):
         if args.purge:
             raise Error("invalid_arguments", "--purge is only valid with launcher remove")
         return launchers.schedule(paths, args.id)
+    if name == "decky":
+        from . import decky
+        if args.appid and args.action != "panel":
+            raise Error("invalid_arguments", "--appid is only supported by decky panel")
+        if args.action == "plugin-status":
+            return decky.plugin_status(paths)
+        if args.action == "plugin-install":
+            return decky.plugin_install(paths)
+        return decky.status(paths) if args.action == "status" else decky.install() if args.action == "install" else decky.panel(paths, args.appid)
     if name in ("proton", "proton-helper"):
         from . import proton
         if name == "proton-helper":
@@ -293,6 +306,7 @@ def execute(args, paths):
         data["default_pending"] = "default_on" if args.on else "default_off"
         save_state(paths, data)
     if name in ("status", "default"):
+        from .decky import shortcut
         _, eligible = takeover.discover(paths)
         pending = [{"appid": ident, "action": item["pending"]} for ident, item in data["games"].items() if item.get("pending")]
         pending += [{"slug": g["slug"], "action": g["pending"]} for g in data.get("non_steam", {}).values() if g.get("pending")]
@@ -300,6 +314,7 @@ def execute(args, paths):
             pending.append({"action": data["default_pending"]})
         pending += takeover.restore_pending(data)
         return {"version": __version__, "install_path": str(paths.data), "steam_running": steam.running(),
+                "shortcut_appid": shortcut(paths),
                 "default_tool": steam.mappings(steam.read_vdf(steam.mapping_path(paths))).get("0", {}).get("name") == "DeckCompanion",
                 "pending": pending,
                 "takeover_all": data.get("settings", {}).get("takeover_all", True),

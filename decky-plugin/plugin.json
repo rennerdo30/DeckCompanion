@@ -1,0 +1,10 @@
+{
+  "name": "DeckCompanion",
+  "author": "rennerdo30",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["utility"],
+    "description": "Game recipes, Proton and mods through the installed DeckCompanion engine."
+  }
+}
