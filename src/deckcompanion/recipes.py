@@ -1,9 +1,11 @@
 """Version-one declarative recipes; downloaded indexes use the same validation."""
 from pathlib import Path
+import hashlib
 import re
 import tomllib
 from urllib.parse import urlsplit
-from .common import Error, app_id, component, inside, read_json
+from . import __version__
+from .common import Error, app_id, component, inside, read_json, write_json
 
 
 def validate(recipe, expected=None):
@@ -62,24 +64,81 @@ def validate(recipe, expected=None):
     return recipe
 
 
-def load(paths, appid):
+def version_key(value):
+    # Numeric components compare numerically; missing provenance predates releases.
+    parts = tuple(int(n) for n in re.findall(r"\d+", str(value)))
+    return parts + (0,) * max(0, 8 - len(parts))
+
+
+def candidates(paths, appid):
     appid = app_id(appid)
     index = read_json(paths.cache / "index.json", {})
     indexed = index.get("recipes", {}).get(appid)
+    result = []
     if indexed:
         try:
-            return validate(tomllib.loads(indexed["toml"]), appid)
+            recipe = validate(tomllib.loads(indexed["toml"]), appid)
+            result.append((recipe, indexed.get("engine_version", index.get("engine", {}).get("version", "0")), indexed["toml"]))
         except (ValueError, TypeError, KeyError) as exc:
             raise Error("invalid_recipe", f"Invalid cached recipe {appid}") from exc
-    cached = paths.cache / "recipes" / f"{appid}.toml"
-    bundled = paths.recipes / f"{appid}.toml"
-    source = cached if cached.exists() else bundled
-    if not source.exists():
-        return None
-    try:
-        return validate(tomllib.loads(source.read_text(encoding="utf-8")), appid)
-    except (ValueError, TypeError, KeyError) as exc:
-        raise Error("invalid_recipe", f"Invalid recipe {appid}: {exc}") from exc
+    for source, engine in ((paths.cache / "recipes" / f"{appid}.toml", "0"),
+                           (paths.recipes / f"{appid}.toml", __version__)):
+        if source.is_file():
+            try:
+                text = source.read_text(encoding="utf-8")
+                recipe = validate(tomllib.loads(text), appid)
+                result.append((recipe, recipe.get("engine_version", engine), text))
+            except (ValueError, TypeError, KeyError) as exc:
+                raise Error("invalid_recipe", f"Invalid recipe {appid}: {exc}") from exc
+    return result
+
+
+def rank(candidate):
+    return version_key(candidate[0]["version"]), version_key(candidate[1])
+
+
+def load(paths, appid):
+    choices = candidates(paths, appid)
+    return max(choices, key=rank)[0] if choices else None
+
+
+def merge_index(previous, incoming):
+    """Activating an engine index must not downgrade any already cached recipe."""
+    merged = dict(incoming, recipes={})
+    for index in (previous or {}, incoming):
+        for ident, item in index.get("recipes", {}).items():
+            item = dict(item, engine_version=item.get("engine_version", index.get("engine", {}).get("version", "0")))
+            old = merged["recipes"].get(ident)
+            def key(entry):
+                return rank((validate(tomllib.loads(entry["toml"]), ident), entry["engine_version"]))
+            if not old or key(item) > key(old):
+                merged["recipes"][ident] = item
+    return merged
+
+
+def refresh_cache(paths):
+    """Refresh older entries without changing the cached engine release metadata."""
+    index = read_json(paths.cache / "index.json", {})
+    changed = False
+    for ident in ids(paths):
+        choices = candidates(paths, ident)
+        if not choices:
+            continue
+        best = max(choices, key=rank)
+        current = index.get("recipes", {}).get(ident)
+        if current and (current["toml"] != best[2] or
+                        version_key(current.get("engine_version", index.get("engine", {}).get("version", "0"))) < version_key(best[1])):
+            index["recipes"][ident] = {"toml": best[2], "engine_version": best[1],
+                                      "sha256": hashlib.sha256(best[2].encode()).hexdigest()}
+            changed = True
+        cached = paths.cache / "recipes" / f"{ident}.toml"
+        if cached.is_file() and tomllib.loads(cached.read_text(encoding="utf-8")) != best[0]:
+            # Discard only this stale cache entry; the selected source remains available.
+            if changed:
+                write_json(paths.cache / "index.json", index)
+            cached.unlink()
+    if changed:
+        write_json(paths.cache / "index.json", index)
 
 
 def ids(paths):

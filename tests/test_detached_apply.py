@@ -34,6 +34,7 @@ def helper_module():
 
 
 def test_linux_handoff_returns_before_shutdown(paths, monkeypatch, capsys):
+    save_state(paths, {"games": {"42": {"pending": "enable"}}})
     monkeypatch.setattr(steam.sys if hasattr(steam, "sys") else __import__("sys"), "platform", "linux")
     monkeypatch.setattr(steam, "running", lambda: True)
     monkeypatch.setenv("XDG_CURRENT_DESKTOP", "gamescope")

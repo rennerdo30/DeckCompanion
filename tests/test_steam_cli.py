@@ -114,9 +114,9 @@ def test_cli_shapes_and_errors(paths, monkeypatch, capsys):
     code, result = invoke(capsys, "games")
     assert code == 0
     fs = next(g for g in result["games"] if g["appid"] == "2300320")
-    assert set(fs) == {"appid", "name", "installed", "has_recipe", "enabled", "pending", "recipe_version", "mods", "last_launch"}
+    assert set(fs) == {"appid", "name", "installed", "has_recipe", "enabled", "pending", "recipe_version", "mods", "last_launch", "art", "proton"}
     assert fs["last_launch"] is None and fs["enabled"] is False
-    assert set(fs["mods"][0]) == {"id", "name", "version", "enabled", "installed_version"}
+    assert set(fs["mods"][0]) == {"id", "name", "version", "enabled", "installed_version", "state", "state_message"}
     assert invoke(capsys, "mod", "2300320", "fs25-deck-mode", "--off")[1]["mods"][0]["enabled"] is False
     assert invoke(capsys, "mod", "2300320", "missing", "--on")[0] == 1
     atomic(paths.data / "logs/2300320-last.log", "".join(f"{n}\n" for n in range(230)))

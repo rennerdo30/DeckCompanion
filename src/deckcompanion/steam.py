@@ -50,6 +50,57 @@ def require_closed():
         raise Error("steam_running", "Close Steam before writing its files")
 
 
+def game_running(ident, proc_root=Path("/proc")):
+    """Conservative Linux check: app environment or Steam reaper's exact appid argument."""
+    if not proc_root.is_dir():
+        raise Error("game_state_unknown", "Cannot check whether the game is running")
+    try:
+        for process in proc_root.glob("[0-9]*"):
+            try:
+                if hasattr(os, "getuid") and process.stat().st_uid != os.getuid():
+                    continue  # Steam and its games run as the invoking desktop user.
+                env = (process / "environ").read_bytes().split(b"\0")
+                if f"SteamAppId={ident}".encode() in env:
+                    return True
+                args = (process / "cmdline").read_bytes().split(b"\0")
+                if args and Path(os.fsdecode(args[0])).name == "reaper":
+                    for i, arg in enumerate(args[:-1]):
+                        if arg == b"SteamLaunch" and args[i + 1] == f"AppId={ident}".encode():
+                            return True
+            except (FileNotFoundError, ProcessLookupError):
+                continue  # Process exited during the snapshot.
+    except OSError as exc:
+        raise Error("game_state_unknown", "Cannot check all game processes safely") from exc
+    return False
+
+
+def content_roots(paths, ident):
+    entry = installed(paths).get(ident)
+    roots = [Path(entry["library"])] if entry else libraries(paths)
+    prefix = next((lib / "steamapps/compatdata" / ident for lib in roots
+                   if (lib / "steamapps/compatdata" / ident / "pfx").is_dir()), None)
+    return prefix, Path(entry["path"]) if entry else None
+
+
+def artwork(paths, ident):
+    cache = paths.steam / "appcache/librarycache"
+    try:
+        grid = shortcut_path(paths).parent / "grid"
+    except Error:
+        grid = None
+    result = {}
+    for name, filename, suffix in (("portrait", "library_600x900", "p"),
+                                   ("hero", "library_hero", "_hero"),
+                                   ("header", "header", ""), ("logo", "logo", "_logo")):
+        options = [p for ext in ("jpg", "png") for p in sorted((cache / ident).glob(f"*/{filename}.{ext}"))]
+        options += [cache / ident / f"{filename}.{ext}" for ext in ("jpg", "png")]
+        options += [cache / f"{ident}_{filename}.{ext}" for ext in ("jpg", "png")]
+        if grid:
+            options.append(grid / f"{ident}{suffix}.png")
+        result[name] = next((str(p.resolve()) for p in options if p.is_file()), None)
+    return result
+
+
 def start():
     proc = subprocess.Popen(["steam", "-silent"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     STARTED_PIDS.append(proc.pid)
@@ -173,18 +224,60 @@ def shortcut_bytes(paths, path, remove=False):
     entries = list(doc.setdefault("shortcuts", {}).values())
     exe, unsigned = shortcut_identity(paths)
     ident = unsigned - 0x100000000  # Steam interprets the signed VDF int32 bits as uint32.
-    entries = [e for e in entries if not (e.get("appid") == ident and e.get("Exe") == exe)]
+    owned = lambda e: e.get("appid") == ident and e.get("Exe") == exe
+    previous = next((e for e in entries if owned(e)), None)
     if not remove:
         icon = paths.data / "assets/icon.png"
-        entries.append({"appid": ident, "AppName": "DeckCompanion", "Exe": exe,
+        desired = {"appid": ident, "AppName": "DeckCompanion", "Exe": exe,
                         "StartDir": '"' + str(paths.data / "bin") + '"',
                         "icon": str(icon) if icon.is_file() else "", "LaunchOptions": "",
-                        "IsHidden": 0, "AllowDesktopConfig": 1, "AllowOverlay": 1, "tags": {}})
+                        "IsHidden": 0, "AllowDesktopConfig": 1, "AllowOverlay": 1}
+        if previous and all(previous.get(k) == value for k, value in desired.items()):
+            return path.read_bytes()  # Steam-added fields, order and player tags stay intact.
+        desired = dict(previous or {"tags": {}}, **desired)
+        entries = [desired if owned(e) else e for e in entries] if previous else [*entries, desired]
+    else:
+        entries = [e for e in entries if not owned(e)]
     doc["shortcuts"] = {str(i): item for i, item in enumerate(entries)}
     return vdf.binary_dumps(doc)
 
 
 ARTWORK = {"portrait": "p", "wide": "", "hero": "_hero", "logo": "_logo", "icon": "_icon"}
+
+
+def differs(path, payload):
+    return not path.is_file() or path.read_bytes() != payload
+
+
+def has_pending(data):
+    return bool(data.get("default_pending") or data.get("shortcut_pending") or
+                any(g.get("pending") for g in data["games"].values()))
+
+
+def prune_pending(paths, data):
+    """Drop writes whose managed values already match Steam's current disk state."""
+    target = mappings(read_vdf(mapping_path(paths)))
+    desired = {"name": "DeckCompanion", "config": "", "priority": "250"}
+    if data.get("default_pending") == "default_on" and target.get("0") == desired:
+        data["default_pending"] = None
+    for ident, game in data["games"].items():
+        if game.get("pending") == "enable" and target.get(ident) == desired:
+            if not game.get("enabled"):
+                # Unknown historical mapping must not be invented during an engine update.
+                game.setdefault("previous_mapping", None)
+            game.update(enabled=True, pending=None)
+        elif game.get("pending") == "disable" and target.get(ident, {}).get("name") != "DeckCompanion":
+            from . import localfix
+            localfix.remove(paths, ident)
+            game.update(enabled=False, pending=None)
+    if data.get("shortcut_pending"):
+        try:
+            path = shortcut_path(paths)
+            data["shortcut_pending"] = any(differs(p, payload) for p, payload in
+                [(path, shortcut_bytes(paths, path)), *shortcut_artwork(paths, path)])
+        except Error as exc:
+            if exc.code != "steam_user_required":
+                raise  # Leave the queue for apply to resolve an account choice.
 
 
 def shortcut_artwork(paths, path):
@@ -263,6 +356,7 @@ def apply(paths, restart=False):
         writes.extend(shortcut_artwork(paths, path))
         data["shortcut_pending"] = False
         changes.append({"action": "shortcut"})
+    writes = [(p, payload) for p, payload in writes if differs(p, payload)]
     originals = {p: p.read_bytes() if p.exists() else None for p, _ in writes}
     originals.update({p: p.read_bytes() for p in cleanup if p.exists()})
     written = []

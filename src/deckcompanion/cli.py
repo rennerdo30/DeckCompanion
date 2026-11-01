@@ -3,24 +3,32 @@ import argparse
 from collections import deque
 import json
 import sys
-from . import __version__, recipes, steam
+from . import __version__, content, recipes, steam
 from .common import Error, Paths, app_id, locked, read_json, state, save_state
 
 
 def game(paths, ident):
+    from .launch import select_proton
     ident = app_id(ident)
     entry = steam.installed(paths).get(ident)
     recipe = recipes.load(paths, ident)
     saved = state(paths)["games"].get(ident, {})
+    prefix, game_root = steam.content_roots(paths, ident)
+    manifest = read_json(paths.data / "manifests" / f"{ident}.json", {"mods": {}})
+    selected, reason = select_proton(steam.proton(paths), recipe or {})
     mods = []
     for mod in (recipe or {}).get("mods", []):
+        enabled = saved.get("mods", {}).get(mod["id"], mod.get("enabled", True))
+        status, message = content.mod_state(mod, enabled, manifest["mods"].get(mod["id"]),
+            saved.get("mod_status", {}).get(mod["id"]), prefix, game_root)
         mods.append({"id": mod["id"], "name": mod["name"], "version": mod["version"],
-                     "enabled": saved.get("mods", {}).get(mod["id"], mod.get("enabled", True)),
+                     "enabled": enabled, "state": status, "state_message": message,
                      "installed_version": saved.get("installed_mods", {}).get(mod["id"])})
     return {"appid": ident, "name": (entry or recipe or {}).get("name", ident), "installed": entry is not None,
             "has_recipe": recipe is not None, "enabled": saved.get("enabled", False),
             "pending": saved.get("pending"), "recipe_version": recipe["version"] if recipe else None,
-            "mods": mods, "last_launch": saved.get("last_launch")}
+            "mods": mods, "last_launch": saved.get("last_launch"), "art": steam.artwork(paths, ident),
+            "proton": {"name": selected["name"], "reason": reason} if selected else None}
 
 
 class Parser(argparse.ArgumentParser):
@@ -95,8 +103,15 @@ def execute(args, paths):
             saved.setdefault("mods", {})[args.mod_id] = args.on
         else:
             saved["pending"] = name
+        changed = set()
+        if name in ("enable", "mod"):
+            changed = content.immediate(paths, args.appid, recipes.load(paths, args.appid), saved)
         save_state(paths, data)
-        return game(paths, args.appid)
+        result = game(paths, args.appid)
+        if name == "mod":
+            mod = next(m for m in result["mods"] if m["id"] == args.mod_id)
+            result["mod_result"] = {"changed_now": args.mod_id in changed, "message": mod["state_message"]}
+        return result
     if name == "apply":
         return steam.apply(paths, args.restart_steam)
     if name == "default":
@@ -122,6 +137,9 @@ def main(argv=None):
             from .launch import launch
             launch(paths, args.verb, args.cmd)
             return 0
+        if args.command == "apply" and not steam.has_pending(state(paths)):
+            print(json.dumps({"applied": [], "steam_restarted": False}))
+            return 0  # Installers may call apply unconditionally after an engine-only update.
         if args.command == "apply-helper":
             from .apply_helper import apply_helper
             result = apply_helper(paths, args.game_mode)

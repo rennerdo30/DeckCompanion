@@ -6,7 +6,7 @@ from pathlib import Path
 import stat
 import xml.etree.ElementTree as ET
 import zipfile
-from . import net
+from . import net, steam
 from .common import Error, atomic, inside, read_json, write_json
 
 
@@ -19,19 +19,20 @@ def root_for(item, prefix, game):
     return root
 
 
-def reconcile(paths, appid, recipe, prefix, game, preferences, budget, log):
+def reconcile(paths, appid, recipe, prefix, game, preferences, budget, log, statuses=None, changes=None):
     manifest_path = paths.data / "manifests" / f"{appid}.json"
     manifest = read_json(manifest_path, {"mods": {}})
     wanted = {m["id"]: m for m in recipe.get("mods", []) if preferences.get(m["id"], m.get("enabled", True))}
     installed = {}
+    statuses = statuses if statuses is not None else {}
     # A recipe can change roots or targets: old absolute paths are retained only as ownership records.
     for ident in set(manifest["mods"]) | set(wanted):
         previous = manifest["mods"].get(ident)
         mod = wanted.get(ident)
         try:
             same_root = bool(mod and previous and previous.get("root_path") == str(root_for(mod, prefix, game)))
-            if mod and previous and same_root and previous.get("sha256") == mod["sha256"] and previous.get("target") == mod["target"]:
-                if all(Path(f["path"]).is_file() for f in previous["files"]):
+            if mod and previous and same_root and previous.get("version") == mod["version"] and previous.get("sha256") == mod["sha256"] and previous.get("target") == mod["target"]:
+                if record_valid(previous, prefix, game):
                     installed[ident] = previous["version"]
                     continue
             files = {}
@@ -78,6 +79,8 @@ def reconcile(paths, appid, recipe, prefix, game, preferences, budget, log):
                         "files": [{"path": str(p), "sha256": hashlib.sha256(b).hexdigest()} for p, b in files.items()]}
                     installed[ident] = mod["version"]
                 write_json(manifest_path, manifest)
+                if changes is not None:
+                    changes.add(ident)
             except Exception:
                 manifest["mods"] = snapshot
                 for path, payload in originals.items():
@@ -87,10 +90,74 @@ def reconcile(paths, appid, recipe, prefix, game, preferences, budget, log):
                         atomic(path, payload)
                 raise
         except (Error, OSError, ValueError, zipfile.BadZipFile) as exc:
+            statuses[ident] = {"code": getattr(exc, "code", "content_error"),
+                               "message": failure_message(exc)}
             log(f"Mod {ident} ({mod['target'] if mod else previous.get('target', 'manifest files')}): {exc}")
             if previous:
                 installed[ident] = previous["version"]
     return installed
+
+
+def failure_message(exc):
+    return {"content_deferred": "Will install on next launch after the prefix is ready",
+            "unresolved_asset": "Mod download is not ready; run Update first",
+            "content_conflict": "Existing mod files were changed; keeping your files",
+            "unsafe_path": "The mod folder points outside the game prefix",
+            "unsafe_manifest": "The mod folder points outside the game prefix",
+            "network_timeout": "Download timed out; try again or launch later",
+            "download_failed": "Download unavailable; try again or launch later"}.get(
+                getattr(exc, "code", ""), "Could not apply the mod; see game notes")
+
+
+def record_valid(record, prefix, game):
+    allowed = [r.resolve() for r in (prefix, game) if r is not None]
+    return bool(record.get("files")) and all(
+        any(Path(f["path"]).resolve().is_relative_to(r) for r in allowed) and
+        Path(f["path"]).is_file() and net.digest(Path(f["path"])) == f["sha256"]
+        for f in record["files"])
+
+
+def mod_state(mod, enabled, record, error, prefix, game):
+    if not enabled and not record:
+        return "off", "Off"
+    if error and error.get("code") not in ("content_deferred", "game_running", "network_timeout", "download_failed"):
+        return "blocked", error["message"]
+    if not enabled:
+        return "off", "Off; will remove on next launch" if error else "Off"
+    valid = record and record_valid(record, prefix, game)
+    if valid and record.get("version") == mod["version"] and record.get("sha256") == mod["sha256"] and record.get("target") == mod["target"]:
+        return "installed", f"Installed {mod['version']}"
+    if valid:
+        return "update_available", "Update available" + (f"; {error['message']}" if error else "")
+    if error:
+        return ("will_install_on_launch" if error["code"] in ("content_deferred", "game_running") else "blocked"), error["message"]
+    return "will_install_on_launch", "Will install on next launch"
+
+
+def immediate(paths, appid, recipe, saved, budget=None):
+    """Called under state.lock; query commands never reconcile or download."""
+    if not recipe:
+        return set()
+    changes = set()
+    statuses = {}
+    warnings = []
+    try:
+        prefix, game = steam.content_roots(paths, appid)
+        if prefix is None:
+            raise Error("content_deferred", "Will install on next launch after the prefix is ready")
+        if steam.game_running(appid):
+            raise Error("game_running", "Close the game to apply mods; otherwise they apply next launch")
+        installed = reconcile(paths, appid, recipe, prefix, game, saved.get("mods", {}),
+                              budget or net.Budget(), warnings.append, statuses, changes)
+        saved["installed_mods"] = installed
+    except (Error, OSError, ValueError) as exc:
+        message = str(exc) if getattr(exc, "code", "") in ("content_deferred", "game_running", "game_state_unknown") else failure_message(exc)
+        statuses = {m["id"]: {"code": getattr(exc, "code", "content_error"), "message": message}
+                    for m in recipe.get("mods", [])}
+        warnings.append(message)
+    saved["mod_status"] = statuses
+    saved["content_warnings"] = warnings
+    return changes
 
 
 def settings(recipe, prefix, game, log):

@@ -9,14 +9,26 @@ from . import archives, content, localfix, net, recipes, steam
 from .common import Error, atomic, app_id, component, locked, now, save_state, state
 
 
-def resolve_proton(paths, recipe, budget, log):
-    available = steam.proton(paths, log)
-    runtime = recipe.get("runtime", {})
-    pin = runtime.get("proton", "GE-Proton")
+def select_proton(available, recipe):
+    """Installed build for both launch fallback and read-only game previews."""
+    pin = recipe.get("runtime", {}).get("proton", "GE-Proton")
     exact = next((p for p in available if recipe and p["name"] == pin), None)
     if exact:
-        log(f"Using pinned {exact['name']}")
-        return Path(exact["path"])
+        return exact, "pinned"
+    if not available:
+        return None, None
+    fallback = next((p for p in available if p["name"].startswith("GE-Proton")), available[0]) if recipe else available[0]
+    return fallback, "recipe_fallback" if recipe else "newest"
+
+
+def resolve_proton(paths, recipe, budget, log):
+    available = steam.proton(paths, log)
+    selected, reason = select_proton(available, recipe)
+    runtime = recipe.get("runtime", {})
+    pin = runtime.get("proton", "GE-Proton")
+    if reason == "pinned":
+        log(f"Using pinned {selected['name']}")
+        return Path(selected["path"])
     if pin != "GE-Proton" and runtime.get("url") and runtime.get("sha256"):
         staging = None
         try:
@@ -40,7 +52,7 @@ def resolve_proton(paths, recipe, budget, log):
                 shutil.rmtree(staging)
     if available:
         # Recipe fallback retains its GE preference; unconfigured games use newest.
-        fallback = next((p for p in available if p["name"].startswith("GE-Proton")), available[0]) if recipe else available[0]
+        fallback = selected
         log(f"Using installed {fallback['name']} (requested {pin})")
         return Path(fallback["path"])
     raise Error("no_proton", "No installed Proton available; install GE-Proton or Valve Proton in Steam")
@@ -93,9 +105,10 @@ def prepare(paths, verb, command, env=None):
             active = saved.get("enabled", True)
             optional_ok = True
             if active:
+                saved["mod_status"] = {}
                 for operation in (
                     lambda: localfix.generate(paths, ident, recipe),
-                    lambda: saved.update(installed_mods=content.reconcile(paths, ident, recipe, prefix, game, saved.get("mods", {}), budget, log)),
+                    lambda: saved.update(installed_mods=content.reconcile(paths, ident, recipe, prefix, game, saved.get("mods", {}), budget, log, saved["mod_status"])),
                     lambda: content.settings(recipe, prefix, game, log),
                 ):
                     try:

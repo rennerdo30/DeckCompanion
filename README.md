@@ -21,12 +21,14 @@ Steam can stay running. The installer downloads the latest release index and
 engine, verifies SHA256, installs under `~/.local/share/deckcompanion/`, and
 queues DeckCompanion as **Steam's default compatibility tool**. It then applies
 the changes automatically, including from a pipe without a terminal prompt.
-Steam restarts once if running. No root, pacman, pip, services installed on disk,
+Steam restarts once if running and Steam-visible changes are queued. Engine-only
+updates with unchanged mappings, shortcut and artwork need no restart.
+No root, pacman, pip, services installed on disk,
 or PATH changes are needed. Release assets must exist before these URLs work.
 
 An engine-only release works without the UI. A release containing
 `bin/deckcompanion-ui` adds a library shortcut, a stable icon and any supplied
-Steam grid artwork. Installed engine version: `versions/0.3.0/`.
+Steam grid artwork. Installed engine version: `versions/0.3.2/`.
 
 On Linux, applying while Steam runs submits a detached helper and returns
 `scheduled: true` immediately. The helper waits up to 120 seconds for Steam to
@@ -65,9 +67,16 @@ files, saves and downloaded Proton builds. See [Uninstall](#uninstall) below.
 - Managed protonfixes localfixes chain the bundled upstream fix first. User localfixes
   are preserved. Wine installs/registry steps run once per prefix.
 - SHA256 and manifests track mods. FS25 Deck Mode stays zipped in FS25's mods folder.
-  Existing/user-modified files are preserved and logged.
-- Content waits until the next launch after Proton creates `pfx`. Initial settings
+  Enable, install and mod toggles reconcile immediately when the prefix exists and
+  the game is closed. Identical hand-installed files are adopted; different or
+  user-modified files are preserved and reported as blocked.
+- Content waits until launch if Proton has not created `pfx` or the game is running.
+  The CLI reports installed, deferred, update, off and blocked mod states. Initial settings
   use per-prefix stamps and never overwrite later changes.
+- Recipe selection prefers the newer recipe version, then the publishing/bundling
+  engine version; install refreshes stale recipe cache entries.
+- Game JSON includes existing local Steam artwork paths and the installed Proton
+  selection for the preview panel, with no network requests.
 - Steam mappings, shortcuts and grid images change only with Steam closed, with backups.
   Queue enable/disable or `default --on|--off`, then apply. No CEF or remote debugging.
 - `update` installs verified releases and atomically switches `current`; `rollback`

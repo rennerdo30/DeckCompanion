@@ -4,7 +4,8 @@ import os
 from pathlib import Path
 import shutil
 import tempfile
-from . import __version__, content, localfix, net, steam, update
+from dataclasses import replace
+from . import __version__, content, localfix, net, recipes, steam, update
 from .common import Error, atomic, component, now, read_json, save_state, state, write_json
 
 PAYLOAD = ("src", "vdf", "recipes", "compat", "docs", "bin", "assets/logo", "assets/steam", "LICENSE", "THIRD_PARTY_NOTICES.md",
@@ -86,13 +87,21 @@ def install(paths, source):
         (target / "bin/deckcompanion-ui").chmod(0o755)
         data["shortcut_pending"] = True
     data["default_pending"] = "default_on"
-    save_state(paths, data)
     if index is not None:
-        write_json(paths.cache / "index.json", dict(index, fetched_at=now()))
-    pending = bool(data.get("default_pending") or data.get("shortcut_pending") or any(g.get("pending") for g in data["games"].values()))
+        merged = recipes.merge_index(read_json(paths.cache / "index.json"), index)
+        write_json(paths.cache / "index.json", dict(merged, fetched_at=now()))
+    installed_paths = replace(paths, recipes=target / "recipes")
+    recipes.refresh_cache(installed_paths)
+    budget = net.Budget()
+    for ident in set(steam.installed(paths)) | set(data["games"]):
+        content.immediate(installed_paths, ident, recipes.load(installed_paths, ident),
+                          data["games"].setdefault(ident, {}), budget)
+    steam.prune_pending(paths, data)
+    save_state(paths, data)
+    pending = steam.has_pending(data)
     return {"installed": True, "version": version, "shortcut_pending": bool(data.get("shortcut_pending")),
             "steam_changes_pending": pending,
-            "restart_required": True, "legacy_tool_preserved": legacy}
+            "restart_required": pending, "legacy_tool_preserved": legacy}
 
 
 def uninstall(paths):

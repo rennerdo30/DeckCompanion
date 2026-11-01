@@ -17,12 +17,16 @@ contract too. `--help` is the human help exception. No progress messages on stdo
 - `games --json` -> `{"games":[GAME,...]}`. Includes installed games, bundled/cached
   recipes, and games with saved state. IDs are strings. No network requests.
 - `game APPID --json` -> GAME plus `notes` (string) and `log_tail` (array of strings, last 200 lines, newlines stripped).
-- `enable APPID --json` / `disable APPID --json` -> GAME. Queues a change; does not write Steam files.
+- `enable APPID --json` / `disable APPID --json` -> GAME. Queues a mapping change;
+  does not write Steam files. Enable also attempts immediate mod reconciliation.
 - `default --on|--off --json` -> the same object as `status`. Queues setting or
   restoring global `CompatToolMapping` key `"0"`; Steam files stay unchanged until
   `apply`. Install queues `default_on` automatically. The previous complete entry
   is saved at apply time and restored by off/uninstall only while ours is selected.
-- `mod APPID MOD_ID --on|--off --json` -> GAME. Saves preference immediately; content reconciles at launch.
+- `mod APPID MOD_ID --on|--off --json` -> GAME plus
+  `"mod_result":{"changed_now":true,"message":"Installed v0.7.0"}`.
+  Saves preference and attempts to install, adopt, update or remove content immediately.
+  `changed_now` is true only when this mod's content or ownership changed during this command.
 - `apply [--restart-steam] --json` -> `{"applied":[{"appid":"2300320","action":"enable"}],"steam_restarted":true}`.
   Global default changes have `{"action":"default_on"}` or `{"action":"default_off"}`.
   Installer shortcut changes have `{"action":"shortcut"}`. Without restart, Steam must already
@@ -31,7 +35,9 @@ contract too. `--help` is the human help exception. No progress messages on stdo
   The UI can show **Steam will restart now**. Scheduling does not confirm writes succeeded.
   Windows/dev retains in-process shutdown, a 10-second wait and Steam startup.
   Writes recheck Steam and back up originals. Never kill detected Steam processes.
-- `status --json` -> `{"version":"0.3.0","steam_running":false,"default_tool":false,"pending":[],"proton":[{"name":"GE-Proton11-11","path":"..."}],"last_apply":null}`.
+  An empty queue returns `{"applied":[],"steam_restarted":false}` without scheduling
+  a helper or restarting Steam, including with `--restart-steam`.
+- `status --json` -> `{"version":"0.3.2","steam_running":false,"default_tool":false,"pending":[],"proton":[{"name":"GE-Proton11-11","path":"..."}],"last_apply":null}`.
   `default_tool` reflects the current on-disk global mapping, even while a change
   is queued. `pending` retains game entries and adds `{"action":"default_on"}`
   or `{"action":"default_off"}` without an appid for a queued global change.
@@ -77,14 +83,79 @@ GAME:
 ```json
 {"appid":"2300320","name":"Farming Simulator 25","installed":true,
  "has_recipe":true,"enabled":false,"pending":null,"recipe_version":"1.0.0",
- "mods":[{"id":"fs25-deck-mode","name":"FS25 Deck Mode","version":"unresolved",
-          "enabled":true,"installed_version":null}],"last_launch":null}
+ "mods":[{"id":"fs25-deck-mode","name":"FS25 Deck Mode","version":"v0.7.0",
+          "enabled":true,"installed_version":"v0.7.0",
+          "state":"installed","state_message":"Installed v0.7.0"}],"last_launch":null,
+ "art":{"portrait":"/home/deck/.local/share/Steam/appcache/librarycache/2300320/0123456789012345678901234567890123456789/library_600x900.jpg",
+        "hero":null,"header":null,"logo":null},
+ "proton":{"name":"GE-Proton11-11","reason":"pinned"}}
 ```
 `pending` is null, `enable`, or `disable`; `last_launch` is null or
 `{"time":"ISO8601","ok":true}`. `recipe_version` is null for games without recipes.
 Enabled state means the queued mapping was applied; it is independent of mod preferences.
 Disabling restores the previous compatibility mapping if ours is still selected.
 Foreign mappings, shortcut entries, and unmarked protonfixes files are preserved.
+
+`art` is always an object with `portrait`, `hero`, `header`, and `logo`, each an
+absolute path to an existing local file or null. Lookup prefers sorted hashed
+subfolders under `<steam>/appcache/librarycache/<appid>/`, then files directly in
+that folder, then the older `<appid>_library_600x900.jpg`, `<appid>_library_hero.jpg`,
+`<appid>_header.jpg`, and `<appid>_logo.png` layout. Both JPG and PNG are supported.
+The filenames in hashed folders are `library_600x900`, `library_hero`, `header`,
+and `logo`. Non-Steam shortcut fallback uses the selected user's
+`userdata/<user>/config/grid/<appid>{p,_hero,,_logo}.png`. Missing artwork stays
+null so the UI can use its own fallback. No artwork is downloaded.
+
+`proton` is null when no installed Proton is usable, otherwise an object with
+`name` and `reason`: `pinned` for an installed exact recipe pin, `recipe_fallback`
+for the recipe's installed GE/newest fallback, or `newest` without a recipe.
+This uses launch's installed-build selector without downloads, extraction, logs,
+or state changes. A subsequent successful optional pin download at launch can
+supersede the displayed installed fallback.
+
+Each mod keeps `enabled` (wanted) and `installed_version` and adds `state` and
+`state_message`. The state is one of:
+
+- `installed`: the manifest matches the recipe version, checksum and target, and
+  its contained files still match their recorded checksums.
+- `will_install_on_launch`: waiting for a prefix, for the game to close, or for
+  the next reconciliation. This label does not claim installation.
+- `update_available`: an intact older mod remains installed.
+- `off`: the preference is off; the message says if removal must wait for the game.
+- `blocked`: content could not be applied safely, for example changed player files,
+  an unsafe destination, an unresolved download, or unknown process state.
+
+`state_message` is a short player-facing explanation, also used by `mod_result`.
+Detailed containment/download warnings remain in the game's `notes`.
+
+## Immediate mod changes
+
+`mod`, `enable`, and `install` attempt reconciliation when the installed game's
+library has `steamapps/compatdata/<appid>/pfx`. For saved/uninstalled games, existing
+prefixes are searched across Steam libraries. Without a prefix, installation waits
+for launch. Identical hand-installed files are adopted into the ownership manifest;
+different or edited files are preserved. Initial Wine/settings work stays on the
+launch path. Launch reconciliation remains the safety net.
+
+On Linux, inspect `/proc/<pid>/environ` and `/proc/<pid>/cmdline` for processes owned
+by the invoking desktop user. An exact NUL-delimited `SteamAppId=<appid>` environment
+entry or a `reaper` command containing adjacent `SteamLaunch`, `AppId=<appid>`
+arguments means the game is running. Other users' processes are excluded; exited
+processes are skipped. Any unreadable remaining process or unavailable `/proc`
+(including Windows development) blocks immediate content writes. This is a
+process snapshot, not a lock against an external Steam launch starting afterward.
+Steam itself may stay running. Immediate downloads use the same two-second network
+budget as launch; all games in one install share that budget. These checks never
+start or stop game processes. Not verified on hardware.
+
+Recipe selection compares each game's numeric recipe version first, then the engine
+version that published/bundled it. Cached index entries use `engine_version` when
+present, otherwise the index's `engine.version`; standalone cached TOML may declare
+`engine_version`, otherwise its provenance is unknown/oldest. Bundled recipes use
+the running engine version. Equal candidates prefer the resolved indexed recipe.
+Install refreshes older indexed recipes (including their checksum and per-entry
+engine provenance), invalidates older standalone entries, and preserves newer cached
+recipes. The index's engine release metadata is retained independently.
 
 ## Environment / isolation
 
@@ -135,11 +206,11 @@ preserved. Prefix content is deferred until a subsequent launch when `pfx` exist
 Symlinked Documents directories outside the prefix are refused and logged.
 Content warnings also appear in `game APPID --json`'s `notes`, including the mod,
 requested path, resolved destination and containment reason. `log_tail` retains
-the same message; game listing shapes remain unchanged.
+the same launch message; immediate warnings are kept in `notes` and mod state.
 
 ## Update and rollback (slice 3a)
 
-`update --json` -> `{"engine":{"current":"0.3.0","available":"0.3.0","updated":false},"index":{"updated":false,"fetched_at":null}}`.
+`update --json` -> `{"engine":{"current":"0.3.2","available":"0.3.2","updated":false},"index":{"updated":false,"fetched_at":null}}`.
 `fetched_at` is an ISO8601 string after the first successful fetch; null if none.
 Offline operation uses the cache. A cached release can still install offline.
 `rollback --json` -> `{"version":"0.1.0","rolled_back":true}`; no previous version
@@ -148,11 +219,18 @@ is an error. See [updates.md](updates.md) for integrity, cache and signing limit
 ## Installer commands (slice 3)
 
 `install [--source EXTRACTED_RELEASE] --json` ->
-`{"installed":true,"version":"0.3.0","shortcut_pending":true,"steam_changes_pending":true,"restart_required":true,"legacy_tool_preserved":false}`.
+`{"installed":true,"version":"0.3.2","shortcut_pending":true,"steam_changes_pending":true,"restart_required":true,"legacy_tool_preserved":false}`.
 Engine versions, compat tool, bin stubs and UI/assets install while Steam is running.
 Only Steam VDF writes (shortcut and queued mappings) wait for `apply` with Steam closed.
 `steam_changes_pending` includes default/game mappings and the shortcut. Install
-always queues the global default, including engine-only releases. Installs no packages and changes no
+queues the global default only when its managed mapping differs. Shortcut entries,
+artwork bytes and queued per-game mappings are compared against Steam's current disk
+state; matching writes are dropped. Steam-added shortcut properties, ordering and
+player tags are preserved. Apply also skips files with identical bytes.
+An engine-only update with matching Steam files returns
+`{"installed":true,"version":"0.3.2","shortcut_pending":false,"steam_changes_pending":false,"restart_required":false,"legacy_tool_preserved":false}`.
+It needs no apply/restart; the installer's unconditional empty-queue apply is harmless.
+Installs no packages and changes no
 persistent environment.
 The source defaults to the current engine/checkout root. UI shortcut is queued
 only if the release contains `bin/deckcompanion-ui`. `apply` chooses the Steam user.

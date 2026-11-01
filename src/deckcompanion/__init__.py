@@ -1,2 +1,2 @@
 """DeckCompanion: a local, offline-capable Steam compatibility recipe engine."""
-__version__ = "0.3.1"
+__version__ = "0.3.2"
