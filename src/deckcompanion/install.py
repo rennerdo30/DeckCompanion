@@ -8,7 +8,7 @@ from dataclasses import replace
 from . import __version__, content, localfix, net, recipes, steam, update
 from .common import Error, atomic, component, now, read_json, save_state, state, write_json
 
-PAYLOAD = ("src", "vdf", "recipes", "compat", "docs", "bin", "assets/logo", "assets/steam", "LICENSE", "THIRD_PARTY_NOTICES.md",
+PAYLOAD = ("src", "vdf", "recipes", "content", "compat", "docs", "bin", "assets/logo", "assets/steam", "LICENSE", "THIRD_PARTY_NOTICES.md",
            "compatibilitytool.vdf", "toolmanifest.vdf", "install.sh", "uninstall.sh", "DeckCompanion-Installer.desktop")
 
 

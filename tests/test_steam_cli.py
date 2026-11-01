@@ -115,7 +115,8 @@ def test_cli_shapes_and_errors(paths, monkeypatch, capsys):
     assert code == 0
     fs = next(g for g in result["games"] if g["appid"] == "2300320")
     assert set(fs) == {"appid", "name", "installed", "has_recipe", "enabled", "pending", "recipe_version", "mods", "last_launch", "art", "proton", "last_played",
-                       "takeover", "previous_mapping", "valve_recommendation"}
+                       "takeover", "previous_mapping", "valve_recommendation", "options"}
+    assert fs["options"] == {"proton": True, "takeover": True}
     assert fs["last_launch"] is None and fs["enabled"] is False
     assert set(fs["mods"][0]) == {"id", "name", "version", "enabled", "installed_version", "state", "state_message"}
     assert invoke(capsys, "mod", "2300320", "fs25-deck-mode", "--off")[1]["mods"][0]["enabled"] is False

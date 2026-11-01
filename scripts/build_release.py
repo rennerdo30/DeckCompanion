@@ -93,7 +93,7 @@ def build(output, version=__version__, offline=False):
                 if info.name in ("compat/DeckCompanion", "bin/deckcompanion-ui", "install.sh", "uninstall.sh", "DeckCompanion-Installer.desktop"):
                     info.mode = 0o755
                 return info
-            for name in ("src", "vdf", "compat", "docs", "LICENSE", "THIRD_PARTY_NOTICES.md", "compatibilitytool.vdf", "toolmanifest.vdf", "install.sh", "uninstall.sh", "DeckCompanion-Installer.desktop"):
+            for name in ("src", "vdf", "compat", "content", "docs", "LICENSE", "THIRD_PARTY_NOTICES.md", "compatibilitytool.vdf", "toolmanifest.vdf", "install.sh", "uninstall.sh", "DeckCompanion-Installer.desktop"):
                 source = ROOT / name
                 if source.exists():
                     tar.add(source, arcname=name, filter=include)
