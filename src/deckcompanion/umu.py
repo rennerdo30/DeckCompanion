@@ -88,6 +88,8 @@ def install(paths, budget=None):
             else:
                 result = activate(paths, item, budget)
             write_json(paths.cache / "umu-current.json", item)
+            from .updates import record
+            record(paths, "umu", "umu-launcher", active.get("version") if active else None, item["version"])
             return result
         except channels.FAILURES as exc:
             if active:

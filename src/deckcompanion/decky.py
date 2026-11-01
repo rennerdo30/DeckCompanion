@@ -1,4 +1,4 @@
-"""Decky discovery and explicit Desktop installer handoff; never handles credentials."""
+"""Decky discovery and explicit installs; passwords exist only in memory/stdin."""
 import json
 import os
 from pathlib import Path
@@ -10,7 +10,7 @@ import tempfile
 import time
 import zipfile
 from . import net, steam
-from .common import Error, atomic, read_json, state, write_json
+from .common import Error, atomic, locked, read_json, state, write_json
 
 RELEASE_URL = "https://api.github.com/repos/SteamDeckHomebrew/decky-loader/releases/latest"
 INSTALLER_URL = "https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh"
@@ -18,6 +18,178 @@ INSTALL_COMMAND = f"curl -L {INSTALLER_URL} | sh"
 CACHE_SECONDS = 6 * 3600
 PLUGIN_FILES = ("main.py", "plugin.json", "package.json", "dist/index.js", "LICENSE", "THIRD_PARTY_NOTICES.md", "sources/decky-api.tar.gz")
 PLUGIN_RELEASES = "https://api.github.com/repos/rennerdo30/DeckCompanion/releases?per_page=100"
+STORE_URL = "https://plugins.deckbrew.xyz/plugins"
+STORE_CDN = "https://cdn.tzatzikiweeb.moe/file/steam-deck-homebrew/versions/"
+
+
+def cached_json(path):
+    try:
+        value = read_json(path, {})
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def newer(installed_version, version):
+    from .recipes import version_key
+    return bool(isinstance(installed_version, str) and isinstance(version, str) and
+                version_key(version.lstrip("v")) > version_key(installed_version.lstrip("v")))
+
+
+def store_plugins(paths, refresh=True):
+    cache = paths.cache / "decky-store.json"
+    saved = cached_json(cache)
+    cached = saved.get("plugins", {})
+    cached = {name: item for name, item in cached.items() if isinstance(name, str) and isinstance(item, dict) and
+              isinstance(item.get("version"), str) and isinstance(item.get("sha256"), str) and
+              re.fullmatch(r"[a-f0-9]{64}", item["sha256"]) and item.get("url") == STORE_CDN + item["sha256"] + ".zip"} if isinstance(cached, dict) else {}
+    checked = saved.get("checked_at", 0)
+    if not refresh or (saved and isinstance(checked, (int, float)) and 0 <= time.time() - checked < CACHE_SECONDS):
+        return cached
+    try:
+        with tempfile.TemporaryDirectory(prefix="dc-store-") as temp:
+            target = Path(temp) / "plugins.json"
+            net.fetch(STORE_URL, target, net.Budget(2), max_bytes=8 * 1024**2)
+            rows = json.loads(target.read_text(encoding="utf-8"))
+        if not isinstance(rows, list):
+            raise ValueError("Expected a plugin store list")
+        result = {}
+        for row in rows:
+            name, versions = row["name"], row["versions"]
+            if not isinstance(name, str) or not isinstance(versions, list) or name in result:
+                raise ValueError("Invalid store entry")
+            if not versions:
+                continue
+            version, sha = versions[0]["name"], versions[0]["hash"]
+            if not isinstance(version, str) or not re.fullmatch(r"[a-f0-9]{64}", sha):
+                raise ValueError("Invalid store version/hash")
+            result[name] = {"version": version, "sha256": sha, "url": STORE_CDN + sha + ".zip"}
+        write_json(cache, {"plugins": result, "checked_at": time.time()})
+        return result
+    except (Error, OSError, ValueError, TypeError, KeyError, AttributeError):
+        return cached
+
+
+def installed_plugins():
+    result = []
+    try:
+        directories = sorted((homebrew() / "plugins").iterdir())
+    except OSError:
+        return result
+    for directory in directories:
+        if directory.name.startswith(".") or directory.is_symlink() or not directory.is_dir():
+            continue
+        metadata = cached_json(directory / "plugin.json")
+        name = metadata.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        version = cached_json(directory / "package.json").get("version")
+        result.append({"dir": directory.name, "name": name,
+                       "installed": version if isinstance(version, str) else None})
+    return result
+
+
+def plugins_status(paths, refresh=True):
+    rows = installed_plugins()
+    store = store_plugins(paths, refresh) if any(r["name"] != "DeckCompanion" for r in rows) else {}
+    own = (plugin_release(paths) if refresh else cached_json(paths.cache / "decky-plugin-release.json")) if any(r["name"] == "DeckCompanion" for r in rows) else {}
+    result = []
+    for row in rows:
+        release = own if row["name"] == "DeckCompanion" else store.get(row["name"], {})
+        version = release.get("version")
+        version = version if isinstance(version, str) else None
+        result.append(dict(row, latest=version, update_available=newer(row["installed"], version)))
+    return result
+
+
+def available(paths):
+    """Notification reads never contact upstream or query services/sudo."""
+    result = []
+    version = None
+    try:
+        version = (homebrew() / "services/.loader.version").read_text(encoding="utf-8").strip() or None
+    except OSError:
+        pass
+    release = cached_json(paths.cache / "decky-release.json").get("version")
+    if isinstance(release, str) and release and (not installed() or newer(version, release)):
+        result.append({"module": "decky-loader", "name": "Decky Loader", "installed": version, "latest": release})
+    rows = plugins_status(paths, refresh=False)
+    for row in rows:
+        if row["update_available"]:
+            result.append({"module": "deckcompanion-plugin" if row["name"] == "DeckCompanion" else "decky-plugins",
+                           "name": row["name"], "installed": row["installed"], "latest": row["latest"]})
+    own = cached_json(paths.cache / "decky-plugin-release.json").get("version")
+    if isinstance(own, str) and installed() and not any(row["name"] == "DeckCompanion" for row in rows):
+        result.append({"module": "deckcompanion-plugin", "name": "DeckCompanion", "installed": None, "latest": own})
+    return result
+
+
+def update_plugins(paths, password):
+    """Update installed plugins only. Independent failures never undo the Loader."""
+    from . import decky_archive, updates
+    result = {"plugins_updated": [], "plugins_failed": []}
+    with locked(paths, "decky-plugins.lock"):
+        for row in plugins_status(paths):
+            if not row["update_available"]:
+                continue
+            try:
+                own = row["name"] == "DeckCompanion"
+                release = (cached_json(paths.cache / "decky-plugin-release.json") if own else
+                           store_plugins(paths, refresh=False)[row["name"]])
+                with tempfile.TemporaryDirectory(prefix="dc-plugin-") as temp:
+                    archive = Path(temp) / "plugin.zip"
+                    net.fetch(release["url"], archive, net.DownloadBudget(60), max_bytes=decky_archive.MAX_ARCHIVE)
+                    if net.digest(archive) != release["sha256"]:
+                        raise Error("checksum_mismatch", "Plugin SHA256 mismatch")
+                    # Preflight as user; root repeats verification on its private snapshot.
+                    decky_archive.extract(archive, Path(temp) / "check", row["name"], row["latest"])
+                    target = homebrew() / "plugins" / row["dir"]
+                    code = Path(decky_archive.__file__).read_text(encoding="utf-8")
+                    proc = subprocess.Popen([shutil.which("sudo"), "-S", "-k", "-p", "", "timeout", "-k", "5", "110", sys.executable, "-I", "-c", code,
+                                             str(archive), str(target), row["name"], row["latest"], release["sha256"]],
+                                            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
+                    steam.STARTED_PIDS.append(proc.pid)
+                    try:
+                        proc.communicate(password + "\n", timeout=120)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.communicate(timeout=5)
+                        raise Error("plugin_timeout", "Plugin replacement timed out")
+                    if proc.returncode:
+                        raise Error("plugin_install_failed", "Root plugin replacement failed")
+                result["plugins_updated"].append(row["name"])
+                if own:
+                    updates.record(paths, "decky-plugin", row["name"], row["installed"], row["latest"])
+            except Exception as exc:
+                # Exception text can include subprocess inputs. Expose only fixed errors.
+                code = exc.code if isinstance(exc, Error) else "invalid_plugin"
+                result["plugins_failed"].append({"name": row["name"], "error": code})
+    return result
+
+
+def _check_password(password_file):
+    password = _read_secret(password_file)
+    if not password:
+        raise Error("password_required", "Enter your Deck password")
+    if not sys.platform.startswith("linux") or not shutil.which("sudo"):
+        raise Error("unsupported", "Decky installs only on SteamOS / Linux")
+    check = subprocess.run([shutil.which("sudo"), "-S", "-k", "-p", "", "true"], input=password + "\n", text=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+    if check.returncode:
+        raise Error("wrong_password", "That password was not accepted")
+    return password
+
+
+def update_plugins_with_password(paths, password_file):
+    password = _check_password(password_file)
+    try:
+        result = update_plugins(paths, password)
+    finally:
+        password = None
+    changed = bool(result["plugins_updated"])
+    if changed:
+        restart_steam()
+    return dict(result, steam_restarting=changed)
 
 
 def homebrew():
@@ -81,7 +253,7 @@ def status(paths):
         except (Error, OSError):
             pass
     return {"installed": installed(), "version": version, "service": service, "latest": latest(paths),
-            "password_set": password_set()}
+            "password_set": password_set(), "plugins": plugins_status(paths)}
 
 
 def password_set():
@@ -171,22 +343,8 @@ def install_with_password(paths, password_file):
     password to a private file in XDG_RUNTIME_DIR (tmpfs, mode 0700 directory); it is
     read once, deleted immediately and only ever passed to sudo on stdin. It is never
     logged or stored (owner request, 2026-11-01)."""
-    source = Path(password_file)
-    try:
-        password = source.read_text(encoding="utf-8").rstrip("\n")
-    except OSError as exc:
-        raise Error("password_required", "Enter your Deck password to install Decky") from exc
-    finally:
-        source.unlink(missing_ok=True)
-    if not password:
-        raise Error("password_required", "Enter your Deck password to install Decky")
-    if not sys.platform.startswith("linux") or not shutil.which("sudo"):
-        raise Error("unsupported", "Decky installs only on SteamOS / Linux")
+    password = _check_password(password_file)
     sudo = shutil.which("sudo")
-    check = subprocess.run([sudo, "-S", "-k", "-p", "", "true"], input=password + "\n", text=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
-    if check.returncode:
-        raise Error("wrong_password", "That password was not accepted")
     script = paths.data / "run" / "decky-install_release.sh"
     script.parent.mkdir(parents=True, exist_ok=True)
     net.fetch(INSTALLER_URL, script, net.Budget(30), max_bytes=1024 * 1024)
@@ -195,13 +353,18 @@ def install_with_password(paths, password_file):
     with log.open("w", encoding="utf-8") as output:
         proc = subprocess.run([sudo, "-S", "-k", "-p", "", "sh", str(script)], input=password + "\n", text=True,
                               stdout=output, stderr=subprocess.STDOUT, timeout=600)
-    password = None
     if proc.returncode:
         raise Error("decky_install_failed", f"The Decky installer stopped with code {proc.returncode}; see {log}")
+    try:
+        plugins = update_plugins(paths, password)
+    except Exception:
+        plugins = {"plugins_updated": [], "plugins_failed": [{"name": "Decky plugins", "error": "plugin_update_failed"}]}
+    finally:
+        password = None
     restart_steam()
-    version_file = Path.home() / "homebrew/services/.loader.version"
+    version_file = homebrew() / "services/.loader.version"
     version = version_file.read_text(encoding="utf-8").strip() if version_file.is_file() else None
-    return {"installed": installed(), "version": version, "steam_restarting": True, "log": str(log)}
+    return dict(installed=installed(), version=version, steam_restarting=True, log=str(log), **plugins)
 
 
 def restart_steam():
@@ -439,5 +602,7 @@ def plugin_install(paths):
             if backup:
                 os.rename(backup, target)
             raise
+    from . import updates
+    updates.record(paths, "decky-plugin", "DeckCompanion", result["version"], release["version"])
     return dict(result, installed=True, version=release["version"], changed=True, path=str(target),
                 backup=str(backup) if backup else None, instructions="Reload plugins in Decky Settings.")

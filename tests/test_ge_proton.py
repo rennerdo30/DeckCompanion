@@ -55,6 +55,8 @@ def test_install_atomic_receipt_and_idempotence(paths, ge, monkeypatch):
     monkeypatch.setattr(net, "download", lambda *a: pytest.fail("already installed"))
     assert proton.run(paths, "install", NAME)["installed"] is True
     assert proton.listing(paths)["active"] is False
+    entries = read_json(paths.data / "updates.json", {}).get("entries", [])
+    assert [(e["module"], e["from"], e["to"]) for e in entries] == [("ge-proton", None, NAME)]
 
 
 @pytest.mark.parametrize("mode", ["checksum", "archive", "disk", "interrupted", "conflict"])
@@ -119,6 +121,8 @@ def test_update_installs_enabled_pins_and_latest_preserves_settings(paths, ge, m
     assert {NAME, "GE-Proton11-10"} == {p.name for p in paths.tools.iterdir()}
     assert state(paths)["settings"] == {"splash": False}
     assert result["proton"]["errors"] == []
+    entries = read_json(paths.data / "updates.json", {}).get("entries", [])
+    assert {e["to"] for e in entries if e["module"] == "ge-proton"} == {NAME, "GE-Proton11-10"}
 
 
 def test_auto_off_still_installs_enabled_pins_cleanup_off_preserves_old(paths, ge, monkeypatch):

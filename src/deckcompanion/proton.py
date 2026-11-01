@@ -355,6 +355,8 @@ def install(paths, name):
         os.rename(root, target)
         partial.unlink(missing_ok=True)
         report(paths, name, "installed", percent=100, total_bytes=release["size"])
+        from .updates import record
+        record(paths, "ge-proton", "GE-Proton", None, name)
         return {"name": name, "state": "installed", "path": str(target), "sha256": sha256}
     except Exception as exc:
         report(paths, name, "failed", error=str(exc))

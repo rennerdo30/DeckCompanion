@@ -67,6 +67,9 @@ def parser():
     root = Parser(prog="deckcompanion")
     root.add_argument("--json", action="store_true")
     commands = root.add_subparsers(dest="command", required=True)
+    updates = commands.add_parser("updates")
+    updates.add_argument("--json", action="store_true")
+    updates.add_argument("--seen", action="store_true")
     catalog = commands.add_parser("launchers")
     catalog.add_argument("--json", action="store_true")
     launcher = commands.add_parser("launcher")
@@ -79,7 +82,7 @@ def parser():
     helper.add_argument("token")
     helper.add_argument("--json", action="store_true")
     decky = commands.add_parser("decky")
-    decky.add_argument("action", choices=("status", "install", "install-desktop", "set-password", "panel", "plugin-status", "plugin-install"))
+    decky.add_argument("action", choices=("status", "install", "install-desktop", "set-password", "panel", "plugin-status", "plugin-install", "update-plugins"))
     decky.add_argument("--appid", type=app_id)
     decky.add_argument("--password-file")
     decky.add_argument("--json", action="store_true")
@@ -148,6 +151,9 @@ def parser():
 
 def execute(args, paths):
     name = args.command
+    if name == "updates":
+        from .updates import summary
+        return summary(paths, args.seen)
     if name in ("launchers", "launcher", "launcher-helper"):
         from . import launchers
         if name == "launchers":
@@ -161,12 +167,20 @@ def execute(args, paths):
         return launchers.schedule(paths, args.id)
     if name == "decky":
         from . import decky
+        if args.password_file and (args.appid or args.action not in ("install", "set-password", "update-plugins")):
+            from pathlib import Path
+            Path(args.password_file).unlink(missing_ok=True)
+            raise Error("invalid_arguments", "--password-file is only supported by install, set-password and update-plugins without --appid")
         if args.appid and args.action != "panel":
             raise Error("invalid_arguments", "--appid is only supported by decky panel")
         if args.action == "plugin-status":
             return decky.plugin_status(paths)
         if args.action == "plugin-install":
             return decky.plugin_install(paths)
+        if args.action == "update-plugins":
+            if not args.password_file:
+                raise Error("password_required", "--password-file is required")
+            return decky.update_plugins_with_password(paths, args.password_file)
         if args.action == "set-password":
             if not args.password_file:
                 raise Error("password_required", "--password-file is required")
