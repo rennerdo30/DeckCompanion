@@ -156,7 +156,8 @@ def apply_helper(paths, was_game_mode=False):
     with locked(paths, "apply.lock"):
         started = time.monotonic()
         result = {"pid": os.getpid(), "started_at": now(), "applied": [], "errors": [],
-                  "timings": {}, "steam_restarted": False, "game_mode": False}
+                  "timings": {}, "steam_restarted": False, "game_mode": False,
+                  "steam_change_reasons": []}
         log = paths.data / "logs/apply-last.json"
         write_json(log, result)
         shutdown = False
@@ -170,6 +171,12 @@ def apply_helper(paths, was_game_mode=False):
             with pending_plan(paths) as initial:
                 result["timings"]["prepare"] = time.monotonic() - phase
                 result.update(attempts=0, verified=False)
+                result["steam_change_reasons"] = initial["steam_change_reasons"]
+                write_json(log, result)
+                if not initial["changes"]:
+                    save_state(paths, initial["data"])
+                    result["verified"] = True
+                    return result
                 for attempt in range(2):
                     result["attempts"] = attempt + 1
                     # Refresh Steam's unrelated fields after a failed verification, retaining

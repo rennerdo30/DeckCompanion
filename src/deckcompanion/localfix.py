@@ -1,5 +1,6 @@
 """Generate only marked localfixes, preserving the running GE's upstream game fix."""
 import hashlib
+from pathlib import Path
 from .common import Error, atomic, app_id
 
 MARKER = "# managed-by: DeckCompanion\n"
@@ -63,5 +64,44 @@ def _deckcompanion_{revision}():
 
 def remove(paths, appid):
     path = paths.config / "localfixes" / f"{app_id(appid)}.py"
-    if path.exists() and path.read_text(encoding="utf-8").startswith(MARKER):
+    if managed(path):
         path.unlink()
+
+
+def managed(path):
+    return path.is_file() and path.read_bytes().startswith((MARKER.encode(), MARKER.replace('\n', '\r\n').encode()))
+
+
+def prune(paths, data):
+    """Migrate obsolete managed fixes; foreign files are never decoded or changed."""
+    import re
+    from . import appinfo, launch, recipes, steam
+    import vdf
+    obsolete = {str(steam.shortcut_identity(paths)[1])}
+    obsolete.update(str(g['appid']) for g in data.get('non_steam', {}).values())
+    for path in (paths.steam / 'userdata').glob('*/config/shortcuts.vdf'):
+        for entry in vdf.binary_loads(path.read_bytes()).get('shortcuts', {}).values():
+            ident = steam.shortcut_value('appid', steam.shortcut_field(entry, 'appid'))
+            exe = steam.shortcut_value('Exe', steam.shortcut_field(entry, 'Exe'))
+            if ident is not None and (steam.shortcut_owned(paths, entry) or launch.native([exe])):
+                obsolete.add(str(ident))
+    metadata = appinfo.load(paths)
+    platforms = lambda value: set(re.split(r'[,\s]+', str(value).lower())) - {''}
+    for ident, entry in steam.installed(paths).items():
+        manifest = steam.read_vdf(Path(entry['library']) /
+                                 f'steamapps/appmanifest_{ident}.acf').get('AppState', {})
+        app = metadata['apps'].get(ident, {})
+        chosen = manifest.get('UserConfig', {}).get('platform_override_dest') or manifest.get('oslist')
+        systems = platforms(chosen) if chosen else set().union(*(
+            platforms(app.get('depots', {}).get(d, '')) for d in manifest.get('InstalledDepots', {})))
+        if not systems:
+            systems = platforms(app.get('oslist', ''))
+        if 'linux' in systems and 'windows' not in systems:
+            obsolete.add(ident)
+    for file in (paths.config / 'localfixes').glob('[0-9]*.py'):
+        if not file.stem.isdigit() or not managed(file):
+            continue
+        saved = data['games'].get(file.stem, {})
+        enabled = saved.get('enabled') or saved.get('pending') == 'enable'
+        if file.stem in obsolete or (not enabled and recipes.load(paths, file.stem) is None):
+            remove(paths, file.stem)
