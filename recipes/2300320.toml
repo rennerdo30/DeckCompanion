@@ -1,0 +1,21 @@
+schema_version = 1
+appid = "2300320"
+name = "Farming Simulator 25"
+version = "1.0.0"
+notes = "Not verified on hardware. Index builder resolves Deck Mode to an immutable asset and SHA256. Prefix content is deferred until pfx exists."
+
+[runtime]
+proton = "GE-Proton11-11"
+
+[[mods]]
+id = "fs25-deck-mode"
+name = "FS25 Deck Mode"
+version = "unresolved"
+url = "https://github.com/rennerdo30/FS25_DeckMode/releases/latest"
+sha256 = ""
+release_repo = "rennerdo30/FS25_DeckMode"
+asset = "FS25_DeckMode.zip"
+mode = "copy"
+root = "prefix"
+target = "pfx/drive_c/users/steamuser/Documents/My Games/FarmingSimulator2025/mods/FS25_DeckMode.zip"
+enabled = true

@@ -1,0 +1,9 @@
+schema_version = 1
+appid = "602520"
+name = "NEKOPARA Vol. 3"
+version = "1.0.0"
+notes = "Migrated wmp11 verb only. Historical blanket chmod and network-cloned mf-install scripts omitted; modern GE includes media support. Not verified on hardware."
+[runtime]
+proton = "GE-Proton11-11"
+[wine]
+winetricks = ["wmp11"]

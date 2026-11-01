@@ -1,0 +1,9 @@
+schema_version = 1
+appid = "2087030"
+name = "Shatterline"
+version = "1.0.0"
+notes = "Historical d3dcompiler_47/win7 settings preserved as an optional recipe, not a current compatibility claim. Not verified on hardware."
+[runtime]
+proton = "GE-Proton11-11"
+[wine]
+winetricks = ["d3dcompiler_47", "win7"]
