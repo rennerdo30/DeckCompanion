@@ -115,6 +115,8 @@ def uninstall(paths):
         if item.get("pending") == "enable":
             item["pending"] = None
     data["shortcut_pending"] = False
+    for game in data.get("non_steam", {}).values():
+        game.update(removed=True, pending="remove")
     data["default_pending"] = "default_off"
     save_state(paths, data)
     steam.apply(paths)
@@ -123,6 +125,9 @@ def uninstall(paths):
         if file.exists():
             before = file.read_bytes()
             after = steam.shortcut_bytes(paths, file, remove=True)
+            from . import nonsteam
+            for game in data.get("non_steam", {}).values():
+                after = nonsteam.shortcut_bytes(paths, after, game)
             if before != after:
                 steam.guarded_write(file, after)
         ident = steam.shortcut_identity(paths)[1]

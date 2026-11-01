@@ -12,6 +12,57 @@ means success; errors exit 1 with
 `{"error":{"code":"steam_running","message":"..."}}`. Parser errors follow this
 contract too. `--help` is the human help exception. No progress messages on stdout.
 
+## Non-Steam Windows games
+
+```sh
+deckcompanion add-game --exe "$HOME/Games/Example/Game.exe" --name "Example" --store gog --umu-id umu-42 --json
+deckcompanion umu install --json
+deckcompanion apply --restart-steam --json
+deckcompanion run-umu example
+deckcompanion remove-game example --json
+```
+
+`add-game` requires an existing `.exe` and a name. Optional store is `egs`, `gog`
+or `none` (default). Returns a GAME with `kind: "non_steam"`, `slug`, `store`,
+`umu_id`, numeric shortcut `appid`, and `shortcut_pending: "add"`. `games` includes
+these entries; `game APPID` reads detail and logs. Identical executable paths cannot
+be registered twice. Name collisions get a path-derived suffix. Removed registrations
+are retained as recovery records and their prefixes are never reused for another game.
+
+Both add and remove queue Steam writes. `status.pending` and `apply.applied` contain
+`{"slug":"example","action":"add"}` / `"remove"`; existing closed-Steam guards,
+backups and detached Linux apply apply to them. The shortcut executes the installed
+`bin/deckcompanion` stub with `run-umu SLUG`, uses the executable's parent as StartDir,
+and reuses DeckCompanion's installed icon. Removal preserves game files, manifests
+and saves under `prefixes/SLUG/`; it returns `prefix_preserved: true`.
+
+`run-umu` executes the external zipapp with `WINEPREFIX=prefixes/SLUG/pfx`,
+`GAMEID=umu-ID`, `STORE` and absolute `PROTONPATH`. It reuses installed Proton ranking
+with GE preferred, recipe pins and the bounded optional-content/splash path. Mods and
+settings reuse the normal manifest ownership and containment checks. First-launch
+prefix content may be deferred until umu initializes `pfx`; it applies on next launch.
+`mod APPID MOD --on|--off` saves non-Steam preferences for the next launch.
+Non-Steam games use Remove instead of Steam compatibility mapping enable/disable.
+Recipe files are named `recipes/umu-ID.toml`, using the existing schema with
+`appid = "umu-ID"`; recipe version/cache selection and validation are shared.
+
+An explicit umu ID is used directly (a missing `umu-` prefix is added). Otherwise
+registration tries an exact, unique title/store match in the official umu-database
+CSV, cached at `cache/umu-database.csv`. Offline, unknown and ambiguous matches use
+`umu-default`. No fuzzy title guesses. Registration never requires network success.
+
+`umu install --json` downloads official umu-launcher **1.4.4**, verifies its published
+archive SHA256 (`eb590691841f7fad3fc3ad8fd5db4ccb87849fe7948e62b28ece7a4ee48cc851`)
+and pinned LICENSE SHA256, and atomically installs both into `umu/1.4.4/` under the
+data root. Existing modified installations are preserved and reported as conflicts.
+`update` attempts the same installation and adds an `umu` result; offline failures
+leave the previous runtime intact and do not fail the engine update. Runtime download
+has a bounded 20-second budget; launch uses its shared short budget and tells the user
+to run `umu install` if it cannot install. Required missing Proton/umu is an actionable
+error; optional recipe, content and splash failures log and continue the handoff.
+The GPL-3.0 zipapp runs only as a separate process. No runtime code is imported,
+vendored or included in the MIT release tarball. **Not verified on hardware.**
+
 ## Commands available in slice 1
 
 - `games --json` -> `{"games":[GAME,...]}`. Includes installed games, bundled/cached

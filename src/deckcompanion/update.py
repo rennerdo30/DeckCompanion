@@ -134,5 +134,10 @@ def update(paths):
             except Error as exc:
                 if exc.code not in ("network_timeout", "download_failed"):
                     raise
+    from . import umu
+    try:
+        runtime = umu.install(paths)
+    except Exception as exc:
+        runtime = {"installed": False, "error": str(exc)}
     return {"engine": {"current": current(paths), "available": available, "updated": updated},
-            "index": {"updated": fetched, "fetched_at": index.get("fetched_at") if index else None}}
+            "index": {"updated": fetched, "fetched_at": index.get("fetched_at") if index else None}, "umu": runtime}

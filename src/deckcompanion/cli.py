@@ -11,6 +11,11 @@ from .common import Error, Paths, app_id, locked, read_json, state, save_state
 def game(paths, ident):
     from .launch import select_proton
     ident = app_id(ident)
+    from . import nonsteam
+    registered = next((g for g in state(paths).get("non_steam", {}).values()
+                       if g["appid"] == ident and not g.get("removed")), None)
+    if registered:
+        return nonsteam.game(paths, registered)
     entry = steam.installed(paths).get(ident)
     recipe = recipes.load(paths, ident)
     saved = state(paths)["games"].get(ident, {})
@@ -41,6 +46,19 @@ def parser():
     root = Parser(prog="deckcompanion")
     root.add_argument("--json", action="store_true")
     commands = root.add_subparsers(dest="command", required=True)
+    add = commands.add_parser("add-game")
+    add.add_argument("--exe", required=True)
+    add.add_argument("--name", required=True)
+    add.add_argument("--store", choices=("egs", "gog", "none"), default="none")
+    add.add_argument("--umu-id")
+    add.add_argument("--json", action="store_true")
+    for name in ("remove-game", "run-umu"):
+        sub = commands.add_parser(name)
+        sub.add_argument("slug")
+        sub.add_argument("--json", action="store_true")
+    runtime = commands.add_parser("umu")
+    runtime.add_argument("action", choices=("install",))
+    runtime.add_argument("--json", action="store_true")
     for name in ("games", "game", "enable", "disable", "mod", "default", "apply", "status", "update", "rollback", "settings"):
         sub = commands.add_parser(name)
         sub.add_argument("--json", action="store_true")
@@ -77,6 +95,13 @@ def parser():
 def execute(args, paths):
     name = args.command
     data = state(paths)
+    if name in ("add-game", "remove-game", "umu"):
+        from . import nonsteam, umu
+        if name == "umu":
+            return umu.install(paths)
+        if name == "remove-game":
+            return nonsteam.remove(paths, args.slug)
+        return nonsteam.add(paths, args.exe, args.name, args.store, args.umu_id)
     if name == "settings":
         from .splash import DEFAULTS, settings
         options = settings(data)
@@ -113,11 +138,13 @@ def execute(args, paths):
         from . import update
         return getattr(update, name)(paths)
     if name == "games":
-        identifiers = set(steam.installed(paths)) | recipes.ids(paths) | set(data["games"])
-        return {"games": [game(paths, ident) for ident in sorted(identifiers, key=int)]}
+        identifiers = set(steam.installed(paths)) | {i for i in recipes.ids(paths) if i.isdigit()} | set(data["games"])
+        from . import nonsteam
+        return {"games": [game(paths, ident) for ident in sorted(identifiers, key=int)] +
+                [nonsteam.game(paths, saved) for saved in data.get("non_steam", {}).values() if not saved.get("removed")]}
     if name == "game":
         result = game(paths, args.appid)
-        result["notes"] = (recipes.load(paths, args.appid) or {}).get("notes", "")
+        result.setdefault("notes", (recipes.load(paths, args.appid) or {}).get("notes", ""))
         warnings = data["games"].get(args.appid, {}).get("content_warnings", [])
         if warnings:
             result["notes"] += "\n" + "\n".join(warnings)
@@ -129,6 +156,18 @@ def execute(args, paths):
             result["log_tail"] = []
         return result
     if name in ("enable", "disable", "mod"):
+        from . import nonsteam
+        registered = next((g for g in data.get("non_steam", {}).values()
+                           if g["appid"] == args.appid and not g.get("removed")), None)
+        if registered:
+            if name != "mod":
+                raise Error("invalid_action", "Use remove-game to remove a non-Steam game")
+            recipe = recipes.load(paths, registered["umu_id"]) or {}
+            if args.mod_id not in {m["id"] for m in recipe.get("mods", [])}:
+                raise Error("unknown_mod", "No such mod in this recipe")
+            registered.setdefault("mods", {})[args.mod_id] = args.on
+            save_state(paths, data)
+            return nonsteam.game(paths, registered)
         saved = data["games"].setdefault(args.appid, {})
         if name == "mod":
             recipe = recipes.load(paths, args.appid)
@@ -153,6 +192,7 @@ def execute(args, paths):
         save_state(paths, data)
     if name in ("status", "default"):
         pending = [{"appid": ident, "action": item["pending"]} for ident, item in data["games"].items() if item.get("pending")]
+        pending += [{"slug": g["slug"], "action": g["pending"]} for g in data.get("non_steam", {}).values() if g.get("pending")]
         if data.get("default_pending"):
             pending.append({"action": data["default_pending"]})
         return {"version": __version__, "install_path": str(paths.data), "steam_running": steam.running(),
@@ -170,6 +210,10 @@ def main(argv=None):
         if args.command == "launch":
             from .launch import launch
             launch(paths, args.verb, args.cmd)
+            return 0
+        if args.command == "run-umu":
+            from .nonsteam import run
+            run(paths, args.slug)
             return 0
         if args.command == "apply" and not steam.has_pending(state(paths)):
             print(json.dumps({"applied": [], "steam_restarted": False}))

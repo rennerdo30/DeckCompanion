@@ -1,6 +1,7 @@
 extends RefCounted
 
 static func fix(game: Dictionary) -> String:
+	if game.get("kind") == "non_steam" and not game.get("has_recipe",false): return "umu launcher · Own save prefix"
 	if not game.get("has_recipe", false): return "No recipe — Steam launches it normally"
 	if game.get("pending") != null: return "Pending " + str(game.pending)
 	return "Enabled" if game.get("enabled", false) else "Fix available"

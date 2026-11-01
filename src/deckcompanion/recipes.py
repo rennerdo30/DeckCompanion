@@ -8,6 +8,13 @@ from . import __version__
 from .common import Error, app_id, component, inside, read_json, write_json
 
 
+def recipe_id(value):
+    if isinstance(value, str) and value.startswith("umu-"):
+        from .umu import game_id
+        return game_id(value)
+    return app_id(value)
+
+
 def validate(recipe, expected=None):
     def require(ok, message):
         if not ok:
@@ -19,7 +26,7 @@ def validate(recipe, expected=None):
     require(isinstance(recipe, dict), "Recipe must be a table")
     require(recipe.get("schema_version") == 1, "Unsupported recipe schema_version")
     require(isinstance(recipe.get("appid"), str), "appid must be a string")
-    appid = app_id(recipe["appid"])
+    appid = recipe_id(recipe["appid"])
     require(expected is None or appid == expected, "Recipe appid differs from filename")
     component(recipe.get("version"))
     require(isinstance(recipe.get("name"), str), "Recipe name is required")
@@ -71,7 +78,7 @@ def version_key(value):
 
 
 def candidates(paths, appid):
-    appid = app_id(appid)
+    appid = recipe_id(appid)
     index = read_json(paths.cache / "index.json", {})
     indexed = index.get("recipes", {}).get(appid)
     result = []
@@ -142,5 +149,6 @@ def refresh_cache(paths):
 
 
 def ids(paths):
-    bundled = {p.stem for root in (paths.recipes, paths.cache / "recipes") for p in root.glob("*.toml") if p.stem.isdigit()}
+    bundled = {p.stem for root in (paths.recipes, paths.cache / "recipes") for p in root.glob("*.toml")
+               if p.stem.isdigit() or p.stem.startswith("umu-")}
     return bundled | set(read_json(paths.cache / "index.json", {}).get("recipes", {}))

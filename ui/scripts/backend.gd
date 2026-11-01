@@ -6,6 +6,7 @@ var busy := false
 var games: Array = []
 var default_tool := false
 var default_pending = null
+var removed_pending: Array = []
 var worker: Thread
 var active := ""
 var settings := {"splash":true,"splash_seconds":2.5,"show_games_without_recipe":true,"check_updates_on_start":true}
@@ -60,6 +61,8 @@ static func parse_response(raw: String, exit_code: int, command: String) -> Dict
 					if not build is Dictionary or not build.get("name") is String or not build.get("path") is String: valid = false
 		"update": valid = data.get("engine") is Dictionary and data.get("index") is Dictionary and data.engine.get("current") is String and data.engine.get("available") is String and (data.index.get("fetched_at") is String or data.index.get("fetched_at") == null)
 		"apply": valid = data.get("applied") is Array and data.get("steam_restarted") is bool
+		"add-game": valid = valid_game(data) and data.get("kind") == "non_steam" and data.get("slug") is String
+		"remove-game": valid = data.get("removed") == true and data.get("prefix_preserved") == true
 	return data if valid else failure("INVALID_RESPONSE", "The engine response is missing required fields. Please update the engine and UI together.")
 
 static func valid_game(value: Variant) -> bool:
@@ -126,6 +129,17 @@ func _mock_later(command: String, args: Array) -> void:
 	_finish(mock_response(command, args))
 
 func mock_response(command: String, args: Array = []) -> Dictionary:
+	if command == "add-game":
+		var values := {}
+		for i in range(0,args.size(),2): values[args[i]] = args[i+1]
+		if str(values.get("--name","")).strip_edges().is_empty() or not str(values.get("--exe","")).to_lower().ends_with(".exe"): return failure("invalid_exe","Choose an .exe and enter a name")
+		var game := {"appid":str(3000000000+games.size()),"slug":"mock-game-"+str(games.size()),"kind":"non_steam","name":values["--name"],"store":values.get("--store","none"),"exe":values["--exe"],"has_recipe":false,"installed":true,"enabled":true,"mods":[],"pending":null,"shortcut_pending":"add","last_launch":null,"notes":"","log_tail":[]}
+		games.append(game)
+		return game.duplicate(true)
+	if command == "remove-game":
+		games = games.filter(func(g): return g.get("slug") != args[0])
+		removed_pending.append({"action":"remove","slug":args[0]})
+		return {"slug":args[0],"removed":true,"prefix_preserved":true}
 	if command == "settings":
 		for i in args.size():
 			if args[i] == "--splash": settings.splash = args[i+1] == "on"
@@ -147,13 +161,19 @@ func mock_response(command: String, args: Array = []) -> Dictionary:
 	if command == "status":
 		var result := fixture("status")
 		result.pending = games.filter(func(g): return g.get("pending") != null).map(func(g): return {"appid": g.appid})
+		result.pending += games.filter(func(g): return g.get("shortcut_pending") != null).map(func(g): return {"slug":g.slug}) + removed_pending
 		if default_pending != null: result.pending.append({"action": default_pending})
 		result.default_tool = default_tool
 		result.install_path = "/home/deck/.local/share/deckcompanion"
 		return result
 	if command == "apply":
 		var applied: Array = []
+		applied.append_array(removed_pending)
+		removed_pending.clear()
 		for game in games:
+			if game.get("shortcut_pending") != null:
+				applied.append(game.appid)
+				game.shortcut_pending = null
 			if game.pending != null:
 				applied.append(game.appid)
 				if game.pending != null: game.enabled = game.pending == "enable"
