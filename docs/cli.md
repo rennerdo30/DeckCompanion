@@ -229,6 +229,9 @@ removed entries are available in the shortcut backup. Historical state records
 for removed UI identities stay recoverable but cannot become library games or
 restore their obsolete mappings. Unchanged repeated installs queue no restart.
 No UI or Steam file is changed merely by listing the library.
+`status.pending` includes queued `{"appid":"3140405199","action":"remove_shortcut"}`
+identities; apply and its detached receipt report the same action. Cleanup intent
+survives retries even if Steam restores only an obsolete mapping or image.
 
 ## Commands available in slice 1
 

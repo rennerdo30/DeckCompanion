@@ -27,6 +27,10 @@ def write_entries(paths, entries, path=None):
     return path
 
 
+def read_entries(path):
+    return list(vdf.binary_loads(path.read_bytes())["shortcuts"].values())
+
+
 def write_mappings(paths, entries):
     doc = {"unrelated": "preserve"}
     steam.mappings(doc).update(entries)
@@ -192,7 +196,7 @@ def test_repeated_installs_replace_path_identity_preserving_current_steam_fields
     assert path.read_bytes() == source_before
     assert all(p.read_bytes() == b for p, b in before.items())
     steam.apply(paths)
-    entries = steam.shortcut_entries(path)
+    entries = read_entries(path)
     assert len(entries) == 2 and foreign in entries
     actual = next(e for e in entries if steam.shortcut_owned(paths, e))
     assert actual == kept
@@ -211,7 +215,7 @@ def test_repeated_installs_replace_path_identity_preserving_current_steam_fields
         write_entries(paths, [foreign, changed])
         install.install(paths, release)
         steam.apply(paths)
-        entries = steam.shortcut_entries(path)
+        entries = read_entries(path)
         assert len(entries) == 2 and sum(steam.shortcut_owned(paths, e) for e in entries) == 1
         assert steam.shortcut_field(next(e for e in entries if steam.shortcut_owned(paths, e)), "LastPlayTime") == 1793530000
     assert not install.install(paths, release)["steam_changes_pending"]
@@ -282,7 +286,7 @@ def test_duplicate_cleanup_runs_in_existing_detached_helper(paths, release, monk
     receipt = apply_helper.apply_helper(paths)
     assert receipt["verified"] and not receipt["errors"] and receipt["steam_restarted"]
     assert {"appid": str(UI_IDS[0]), "action": "remove_shortcut"} in receipt["applied"]
-    assert not art.exists() and len(steam.shortcut_entries(path)) == 1
+    assert not art.exists() and len(read_entries(path)) == 1
     assert not state(paths)["shortcut_pending"]
     assert len(attempts) == (2 if resurrect else 1)
     assert str(UI_IDS[0]) not in steam.mappings(steam.read_vdf(steam.mapping_path(paths)))
@@ -302,7 +306,7 @@ def test_duplicate_entries_even_with_same_appid_keep_exactly_one(paths, release,
     result = install.install(paths, release)
     assert result["shortcut_pending"]
     steam.apply(paths)
-    entries = steam.shortcut_entries(path)
+    entries = read_entries(path)
     assert len(entries) == 1
     assert steam.shortcut_value("appid", entries[0]["appid"]) == steam.shortcut_identity(paths)[1]
     assert entries[0]["LastPlayTime"] == 123 and entries[0]["tags"] == first["tags"]
