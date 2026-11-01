@@ -3,7 +3,7 @@ import os
 import re
 from pathlib import Path
 import sys
-from . import content, localfix, net, recipes, splash, steam
+from . import community, content, localfix, net, recipes, splash, steam
 from .common import Error, atomic, app_id, locked, now, read_json, save_state, state
 
 
@@ -38,7 +38,8 @@ def match_proton(available, name, aliases=None, valve=False):
     return None
 
 
-def select_proton(available, recipe, override=None, valve=None, aliases=None, log=lambda message: None):
+def select_proton(available, recipe, override=None, valve=None, aliases=None, log=lambda message: None,
+                  community_builds=()):
     """Installed build for both launch fallback and read-only game previews."""
     pin = recipe.get("runtime", {}).get("proton", "GE-Proton")
     exact = next((p for p in available if recipe and p["name"] == pin), None)
@@ -51,7 +52,9 @@ def select_proton(available, recipe, override=None, valve=None, aliases=None, lo
         if selected:
             return selected, "user_override"
         log(f"User Proton override unavailable: {override}; using installed fallback")
-    elif not recipe and valve:
+    if community_builds:
+        return community_builds[0], "community_fix"
+    if not override and not recipe and valve:
         selected = match_proton(available, valve, aliases, valve=True)
         if selected:
             log(f"Valve runtime mapping: {valve} -> {selected['name']}")
@@ -61,7 +64,8 @@ def select_proton(available, recipe, override=None, valve=None, aliases=None, lo
     return fallback, "recipe_fallback" if recipe else "newest"
 
 
-def selection(paths, ident, recipe, saved=None, available=None, metadata=None, log=lambda message: None):
+def selection(paths, ident, recipe, saved=None, available=None, metadata=None, log=lambda message: None,
+              summary=None):
     from . import appinfo
     metadata = appinfo.load(paths, log) if metadata is None else metadata
     saved = saved or {}
@@ -78,15 +82,19 @@ def selection(paths, ident, recipe, saved=None, available=None, metadata=None, l
     override = saved.get("proton_override") or (previous.get("name") if isinstance(previous, dict) else None)
     if override == "DeckCompanion":
         override = None
-    selected, reason = select_proton(steam.proton(paths, log) if available is None else available,
-                                    recipe, override, valve, aliases, log)
+    available = steam.proton(paths, log) if available is None else available
+    matches, known = community.available(paths, ident, available)
+    selected, reason = select_proton(available, recipe, override, valve, aliases, log,
+                                    matches if state(paths).get("settings", {}).get("prefer_community_fixes", True) else ())
+    if summary is not None:
+        summary.update(community.fields(selected, matches, known))
     return selected, reason, valve
 
 
 def resolve_proton(paths, recipe, budget, log, ident=None, saved=None, summary=None):
     available = steam.proton(paths, log)
     if ident:
-        selected, reason, valve = selection(paths, ident, recipe, saved, available, log=log)
+        selected, reason, valve = selection(paths, ident, recipe, saved, available, log=log, summary=summary)
     else:
         selected, reason = select_proton(available, recipe)
         valve = None

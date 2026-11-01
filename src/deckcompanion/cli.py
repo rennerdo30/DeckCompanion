@@ -22,7 +22,8 @@ def game(paths, ident, discovery=None, metadata=None, available=None):
     saved = state(paths)["games"].get(ident, {})
     prefix, game_root = steam.content_roots(paths, ident)
     manifest = read_json(paths.data / "manifests" / f"{ident}.json", {"mods": {}})
-    selected, reason, valve = selection(paths, ident, recipe or {}, saved, available, metadata)
+    fix_info = {}
+    selected, reason, valve = selection(paths, ident, recipe or {}, saved, available, metadata, summary=fix_info)
     mods = []
     for mod in (recipe or {}).get("mods", []):
         enabled = saved.get("mods", {}).get(mod["id"], mod.get("enabled", True))
@@ -38,7 +39,7 @@ def game(paths, ident, discovery=None, metadata=None, available=None):
             "last_played": steam.last_played(paths).get(ident),
             **({"kind": entry["kind"]} if entry and "kind" in entry else {}),
             **takeover.fields(state(paths), ident, discovery[1]), "valve_recommendation": valve,
-            "options": {"proton": True, "takeover": True},
+            "options": {"proton": True, "takeover": True}, **fix_info,
             "proton": {"name": selected["name"], "reason": reason} if selected else None}
 
 
