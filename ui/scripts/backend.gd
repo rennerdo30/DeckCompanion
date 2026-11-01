@@ -48,7 +48,7 @@ static func parse_response(raw: String, exit_code: int, command: String) -> Dict
 			if valid:
 				for build in data.proton:
 					if not build is Dictionary or not build.get("name") is String or not build.get("path") is String: valid = false
-		"update": valid = data.get("engine") is Dictionary and data.get("index") is Dictionary and data.engine.get("current") is String and data.engine.get("available") is String and data.index.get("fetched_at") is String
+		"update": valid = data.get("engine") is Dictionary and data.get("index") is Dictionary and data.engine.get("current") is String and data.engine.get("available") is String and (data.index.get("fetched_at") is String or data.index.get("fetched_at") == null)
 		"apply": valid = data.get("applied") is Array and data.get("steam_restarted") is bool
 	return data if valid else failure("INVALID_RESPONSE", "The engine response is missing required fields. Please update the engine and UI together.")
 

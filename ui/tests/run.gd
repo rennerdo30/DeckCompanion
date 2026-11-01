@@ -34,6 +34,9 @@ func run() -> void:
 	check(Backend.parse_response(JSON.stringify(malformed),0,"game").has("error"),"nested malformed mod rejected")
 	check(Backend.parse_response('{"version":"1","pending":[],"proton":[null],"steam_running":true}',0,"status").has("error"),"malformed Proton rejected")
 	check(Backend.parse_response('{"engine":{},"index":{}}',0,"update").has("error"),"malformed update rejected")
+	# Shapes printed by the real engine CLI (src/deckcompanion/cli.py).
+	check(not Backend.parse_response('{"engine":{"current":"0.2.0","available":"0.2.0","updated":false},"index":{"updated":false,"fetched_at":null}}',0,"update").has("error"),"engine update before first index fetch accepted")
+	check(not Backend.parse_response('{"appid":"2300320","name":"Farming Simulator 25","installed":true,"has_recipe":true,"enabled":false,"pending":"enable","recipe_version":"1.0.0","mods":[{"id":"fs25-deck-mode","name":"FS25 Deck Mode","version":"unresolved","enabled":true,"installed_version":null}],"last_launch":null,"notes":"n","log_tail":[]}',0,"game").has("error"),"engine game detail accepted")
 	var game: Dictionary = backend.mock_response("game",["2300320"])
 	check(game.mods[0].id == "FS25_DeckMode","FS25 fixture and mod")
 	game.name = "changed copy"
