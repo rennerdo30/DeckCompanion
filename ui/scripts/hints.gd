@@ -6,6 +6,9 @@ func _draw() -> void:
 	var font := ThemeDB.fallback_font
 	var keys := ["Enter", "Esc", "X", "Y", "Q / E", "PgUp/Dn"] if keyboard else ["A", "B", "X", "Y", "LB / RB", "R"]
 	var labels := ["Select", "Back", "Toggle" if detail else "Filter", "Apply", "Tabs", "Scroll log"]
+	if not detail:
+		keys.resize(5)
+		labels.resize(5)
 	var x := 0.0
 	for i in keys.size():
 		var width := maxf(30, font.get_string_size(keys[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x + 16)

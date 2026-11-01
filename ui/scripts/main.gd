@@ -208,7 +208,7 @@ func _render() -> void:
 	controls.clear()
 	log_view = null
 	var heading := _row(body)
-	var title := _label("Your library" if tab == 0 else "System & updates",38)
+	var title := _label(("Game details" if detail and not selected.is_empty() else "Your library") if tab == 0 else "System & updates",38)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.add_child(title)
 	_button("Games" + ("  •" if tab == 0 else ""),func(): _switch_tab(0),heading,"games")
@@ -305,8 +305,11 @@ func _detail_screen() -> void:
 	mods.add_child(_label("Mods & recipe",23))
 	if selected.mods.is_empty(): _paragraph(mods,"No optional mods in this recipe." if selected.has_recipe else "A recipe isn’t available yet. Steam will launch this game normally.")
 	for mod in selected.mods:
-		var installed := str(mod.get("installed_version")) if mod.get("installed_version") != null else "Not installed"
-		_button(("✓  " if mod.enabled else "○  ") + mod.name + "   v" + mod.version + "   ·   Installed: " + installed,_toggle_mod.bind(mod),mods,"mod"+mod.id)
+		var version: String = "latest" if mod.version == "unresolved" else "v" + mod.version
+		var installed: String = "Not installed yet" if mod.get("installed_version") == null else "Installed v" + str(mod.installed_version)
+		var state: String = ("On  ·  " if mod.enabled else "Off  ·  ") + installed
+		var mod_button := _button(("✓   " if mod.enabled else "○   ") + mod.name + "   " + version + "      " + state,_toggle_mod.bind(mod),mods,"mod"+mod.id)
+		mod_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	var notes := _card(column)
 	notes.add_child(_label("Recipe notes",23))
 	_paragraph(notes,str(selected.get("notes","Loading recipe notes…")))
@@ -338,11 +341,12 @@ func _updates_screen() -> void:
 	_button("Check for updates",func(): _request("update"),engine,"check")
 	var index := _card(column)
 	index.add_child(_label("Recipe index",23))
-	var fetched: String = str(update.get("index",{}).get("fetched_at",""))
-	var age := "Age unknown. Check for updates to refresh the index."
+	var raw_fetched = update.get("index",{}).get("fetched_at")
+	var fetched: String = raw_fetched if raw_fetched is String else ""
+	var age := "Not fetched yet. Check for updates to download the recipe index."
 	if not fetched.is_empty():
 		var hours := maxi(0,int((Time.get_unix_time_from_system()-Time.get_unix_time_from_datetime_string(fetched))/3600))
-		age = "Fetched %s hour%s ago  ·  %s" % [hours,"" if hours == 1 else "s",fetched]
+		age = ("Fetched just now" if hours == 0 else "Fetched %s hour%s ago" % [hours,"" if hours == 1 else "s"]) + "  ·  " + fetched
 	_paragraph(index,age)
 	var proton := _card(column)
 	proton.add_child(_label("Installed Proton builds",23))

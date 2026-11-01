@@ -48,7 +48,7 @@ The focused runner covers JSON/schema failures, stateful mock enable/mod/apply, 
 Capture three real viewport PNGs from a short windowed mock run (self exits):
 
 ```powershell
-E:/Development/_cache/godot/4.7.2/Godot_v4.7.2-stable_win64.exe --path ui --resolution 1280x800 --max-fps 30 -- --mock --capture-dir=E:/AgentData/DeckCompanion/t3-8e4d459e/ui/docs/screenshots
+E:/Development/_cache/godot/4.7.2/Godot_v4.7.2-stable_win64.exe --path ui --resolution 1280x800 --max-fps 30 -- --mock --capture-dir=<repo>/ui/docs/screenshots
 ```
 
 Review captures: `ui/docs/screenshots/games.png`, `detail.png`, `updates.png`. Automated capture used an offscreen hidden window to avoid taking desktop focus. Runtime output/logs live outside Git in the portable tool cache.
