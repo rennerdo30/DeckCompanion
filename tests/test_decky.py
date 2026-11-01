@@ -391,3 +391,62 @@ def test_install_via_desktop_writes_one_shot_autostart_and_switches(paths, tmp_p
     assert f"rm -f '{autostart}'" in text.splitlines()[1]  # one-shot: removes itself first
     assert decky.INSTALL_COMMAND in text and "konsole" in text
     assert calls and calls[0][-2:] == ["/usr/bin/steamos-session-select", "plasma"]
+
+
+def test_install_with_password_runs_official_installer_as_root_and_deletes_the_password(paths, tmp_path, monkeypatch):
+    # Owner 2026-11-01: install/update Decky inside DeckCompanion, no Desktop Mode switch.
+    from deckcompanion import decky, net, steam
+    monkeypatch.setattr(decky.sys, "platform", "linux")
+    monkeypatch.setattr(decky.shutil, "which", lambda name: "/usr/bin/" + name)
+    secret = tmp_path / "pw"
+    secret.write_text("hunter2\n", encoding="utf-8")
+    runs, restarts = [], []
+    def run(command, input=None, **kwargs):
+        runs.append((command, input))
+        class Result: returncode = 0
+        return Result()
+    monkeypatch.setattr(decky.subprocess, "run", run)
+    monkeypatch.setattr(net, "fetch", lambda url, target, *a, **k: target.write_text("#!/bin/sh\n") or target)
+    monkeypatch.setattr(steam, "run", lambda command, timeout: restarts.append(command) or b"")
+    result = decky.install_with_password(paths, str(secret))
+    assert not secret.exists()  # read once, deleted at once
+    assert runs[0][0][-1] == "true" and runs[0][1] == "hunter2\n"  # password check first
+    assert runs[1][0][:5] == ["/usr/bin/sudo", "-S", "-k", "-p", ""] and runs[1][0][-1].endswith("decky-install_release.sh")
+    assert "hunter2" not in (paths.data / "logs/decky-install.log").read_text()
+    assert result["steam_restarting"] is True and restarts
+
+
+def test_install_with_password_reports_a_wrong_password(paths, tmp_path, monkeypatch):
+    from deckcompanion import decky
+    from deckcompanion.common import Error
+    import pytest
+    monkeypatch.setattr(decky.sys, "platform", "linux")
+    monkeypatch.setattr(decky.shutil, "which", lambda name: "/usr/bin/" + name)
+    secret = tmp_path / "pw"
+    secret.write_text("wrong", encoding="utf-8")
+    class Failed: returncode = 1
+    monkeypatch.setattr(decky.subprocess, "run", lambda *a, **k: Failed())
+    with pytest.raises(Error, match="not accepted"):
+        decky.install_with_password(paths, str(secret))
+    assert not secret.exists()
+
+
+def test_drive_passwd_answers_prompts_for_an_account_without_password():
+    import time
+    from deckcompanion import decky
+    prompts = iter(["Changing password for deck.\nCurrent password: ", "New password: ", "Retype new password: ", None])
+    written = []
+    answered = decky.drive_passwd(lambda: next(prompts), written.append, "s3cret", time.monotonic() + 5)
+    assert written == ["\n", "s3cret\n", "s3cret\n"] and answered == 2
+
+
+def test_set_password_refuses_when_a_password_exists(tmp_path, monkeypatch):
+    import pytest
+    from deckcompanion import decky
+    from deckcompanion.common import Error
+    secret = tmp_path / "pw"
+    secret.write_text("longenough", encoding="utf-8")
+    monkeypatch.setattr(decky, "password_set", lambda: True)
+    with pytest.raises(Error, match="already has a password"):
+        decky.set_password(str(secret))
+    assert not secret.exists()

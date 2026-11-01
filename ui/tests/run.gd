@@ -383,11 +383,22 @@ func settings_checks(ui: Node) -> void:
 	control(ui,"decky_install").pressed.emit()
 	await create_timer(0.3).timeout
 	check(not ui.body.find_children("*","Label",true,false).any(func(l): return l.text == "•  U"),"string instructions render as one line, not one bullet per character")
-	check(ui.decky_dialog.visible,"Loader update asks for confirmation first")
+	# In-app Decky (owner): no Desktop Mode. A Deck without a password first creates one.
+	check(ui.decky_dialog.visible and ui.decky_fields[1].visible and ui.decky_dialog.get_meta("heading").text.begins_with("Create a password"),"Deck without a password is asked to create one inside the app")
+	check(ui.decky_dialog.borderless,"dialogs are borderless (no window frame)")
+	check(ui.keyboard_requests > 0,"the Steam on-screen keyboard opens with the password dialog")
+	ui.decky_fields[0].text = "deck1234"
+	ui.decky_fields[1].text = "different"
+	ui.decky_dialog.confirmed.emit()
+	await create_timer(0.2).timeout
+	check(ui.decky_dialog.visible and ui.decky_error.text.contains("match"),"mismatched passwords are caught before anything runs")
+	ui.decky_fields[0].text = "deck1234"
+	ui.decky_fields[1].text = "deck1234"
 	ui.decky_dialog.confirmed.emit()
 	ui.decky_dialog.hide()
-	await create_timer(0.3).timeout
-	check(ui.decky_handoff.get("switching",false) and ui.notice.contains("Desktop Mode") and not ui.body.find_children("*","Label",true,false).any(func(l): return l.text.begins_with("curl")),"Game Mode update switches to Desktop Mode, no raw command on screen")
+	await create_timer(0.8).timeout
+	check(ui.decky_status.get("password_set") == true and ui.notice.contains("installed") and ui.notice.contains("Steam restarts"),"password set, then Decky installs and Steam restarts, all in the app")
+	check(ui.decky_pending_password.is_empty() and ui.decky_fields[0].text.is_empty(),"the password is not kept in memory or in the fields afterwards")
 	control(ui,"plugin_install").pressed.emit()
 	await create_timer(0.6).timeout
 	check(ui.notice.contains("plugin installed") and control(ui,"plugin_install") == null,"plugin installs independently and the button disappears when current")

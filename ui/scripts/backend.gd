@@ -9,6 +9,7 @@ var takeover_snapshot: Variant = {"taken_at":"2026-11-01T13:31:00+00:00","games"
 var restore_pending := false
 var launcher_ticks := 0
 var mock_plugin := false
+var mock_password_set := false
 var mock_launchers: Array = [
 	{"id":"epic","name":"Epic Games Launcher","store":"egs","state":"not_installed","installed":false,"unattended":true,"warnings":[],"job":null},
 	{"id":"gog","name":"GOG Galaxy","store":"gog","state":"installed","installed":true,"unattended":false,"warnings":[],"job":null},
@@ -83,7 +84,7 @@ static func parse_response(raw: String, exit_code: int, command: String) -> Dict
 		"update": valid = data.get("scheduled",false) or (data.get("engine") is Dictionary and data.get("index") is Dictionary and data.engine.get("current") is String and data.engine.get("available") is String and (data.index.get("fetched_at") is String or data.index.get("fetched_at") == null))
 		"apply": valid = data.get("applied") is Array and data.get("steam_restarted") is bool
 		"launchers": valid = data.get("launchers") is Array
-		"decky": valid = data.has("installed") or data.has("needs_desktop") or data.has("can_install") or data.has("changed")
+		"decky": valid = data.has("installed") or data.has("needs_desktop") or data.has("can_install") or data.has("changed") or data.has("password_set") or data.has("steam_restarting")
 		"launcher": valid = data.get("launcher") is Dictionary or data.has("removed")
 		"restore-all": valid = (data.get("restoring") is int or data.get("restoring") is float) and data.get("pending") is Array
 		"add-game": valid = valid_game(data) and data.get("kind") == "non_steam" and data.get("slug") is String
@@ -205,10 +206,18 @@ func mock_response(command: String, args: Array = []) -> Dictionary:
 	if command == "games": return {"games": [] if scenario == "empty" else games.duplicate(true)}
 	if command == "update": return fixture("update")
 	if command == "decky":
+		# Like the engine, consume the password file at once.
+		var secret := args.find("--password-file")
+		if secret >= 0 and secret + 1 < args.size(): DirAccess.remove_absolute(args[secret + 1])
 		match args[0]:
-			"status": return {"installed": true, "version": "v3.2.8", "service": "active", "latest": {"version": "v3.3.1", "source": "github", "stale": false}}
+			"status": return {"installed": true, "version": "v3.2.8", "service": "active", "password_set": mock_password_set, "latest": {"version": "v3.3.1", "source": "github", "stale": false}}
+			"set-password":
+				mock_password_set = true
+				return {"password_set": true}
 			"install-desktop": return {"switching": true, "autostart": "/home/deck/.config/autostart/deckcompanion-decky-install.desktop"}
-			"install": return {"needs_desktop": true, "launched": false, "command": "curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh | sh", "instructions": ["Switch to Desktop Mode.", "Open Konsole and run the command.", "Enter your sudo password when the official installer asks."]}
+			"install":
+				if args.size() > 2: return {"installed": true, "version": "v3.3.1", "steam_restarting": true}
+				return {"needs_desktop": true, "launched": false, "command": "curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh | sh", "instructions": ["Switch to Desktop Mode.", "Open Konsole and run the command.", "Enter your sudo password when the official installer asks."]}
 			"plugin-status": return {"installed": mock_plugin, "version": "0.1.0" if mock_plugin else null, "decky_installed": true, "plugins_writable": true, "can_install": true, "instructions": "Use Decky Settings > Developer > Install Plugin from ZIP if this directory is not writable.", "latest": {"version": "0.1.0", "source": "github", "stale": false}}
 			"plugin-install":
 				mock_plugin = true

@@ -77,8 +77,9 @@ def parser():
     helper.add_argument("token")
     helper.add_argument("--json", action="store_true")
     decky = commands.add_parser("decky")
-    decky.add_argument("action", choices=("status", "install", "install-desktop", "panel", "plugin-status", "plugin-install"))
+    decky.add_argument("action", choices=("status", "install", "install-desktop", "set-password", "panel", "plugin-status", "plugin-install"))
     decky.add_argument("--appid", type=app_id)
+    decky.add_argument("--password-file")
     decky.add_argument("--json", action="store_true")
     add = commands.add_parser("add-game")
     add.add_argument("--exe", required=True)
@@ -164,6 +165,12 @@ def execute(args, paths):
             return decky.plugin_status(paths)
         if args.action == "plugin-install":
             return decky.plugin_install(paths)
+        if args.action == "set-password":
+            if not args.password_file:
+                raise Error("password_required", "--password-file is required")
+            return decky.set_password(args.password_file)
+        if args.action == "install" and args.password_file:
+            return decky.install_with_password(paths, args.password_file)
         if args.action == "install-desktop":
             return decky.install_via_desktop(paths)
         return decky.status(paths) if args.action == "status" else decky.install() if args.action == "install" else decky.panel(paths, args.appid)

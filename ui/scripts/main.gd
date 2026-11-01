@@ -18,6 +18,14 @@ var decky_status: Dictionary = {}
 var plugin_status: Dictionary = {}
 var decky_handoff: Dictionary = {}
 var decky_dialog: ConfirmationDialog
+var dim: ColorRect
+var decky_fields: Array = []
+var keyboard_requests := 0
+var keyboard_opened_ms := -10000
+var decky_error: Label
+var decky_creating := false
+var decky_pending_password := ""
+var decky_pending_repeat := ""
 var launcher_backend: Node
 var launchers_data: Array = []
 var launcher_poll := 0.0
@@ -364,55 +372,89 @@ func _build_shell() -> void:
 	hints = Hints.new()
 	hints.custom_minimum_size.y = 36
 	root.add_child(hints)
-	dialog = ConfirmationDialog.new()
-	dialog.title = "Apply changes and restart Steam?"
-	dialog.dialog_text = "Steam will close and restart to apply your changes.\nThis management UI will also close when Steam restarts.\nFinish any running game and save your progress first."
-	dialog.ok_button_text = "Apply and restart"
-	dialog.cancel_button_text = "Keep editing"
-	dialog.min_size = Vector2i(660,240)
+	dim = ColorRect.new()
+	dim.color = Color(0.01,0.02,0.03,0.72)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	dim.visible = false
+	add_child(dim)
+	dialog = _make_dialog("Apply changes and restart Steam?","Steam closes and restarts to apply your changes, and DeckCompanion closes with it.\nSave and quit any running game first.","Apply and restart","Keep editing")
 	dialog.confirmed.connect(func(): _request("apply",["--restart-steam"]))
-	dialog.canceled.connect(_restore_modal_focus)
-	add_child(dialog)
 	licenses = AcceptDialog.new()
 	licenses.title = "Licenses"
 	licenses.min_size = Vector2i(760,520)
 	licenses.confirmed.connect(_restore_modal_focus)
 	licenses.canceled.connect(_restore_modal_focus)
 	add_child(licenses)
-	restore_dialog = ConfirmationDialog.new()
-	restore_dialog.title = "Restore previous Steam settings?"
-	restore_dialog.dialog_text = "Every game goes back to the compatibility tool it had before DeckCompanion took over.
-\"Use DeckCompanion for all games\" turns off. Apply restarts Steam once."
-	restore_dialog.ok_button_text = "Restore all"
-	restore_dialog.cancel_button_text = "Keep DeckCompanion"
-	restore_dialog.min_size = Vector2i(720,260)
+	restore_dialog = _make_dialog("Restore previous Steam settings?","Every game goes back to the compatibility tool it had before DeckCompanion took over. \"Use DeckCompanion for all games\" turns off. Apply restarts Steam once.","Restore all","Keep DeckCompanion")
 	restore_dialog.confirmed.connect(func(): _request("restore-all"))
-	restore_dialog.canceled.connect(_restore_modal_focus)
-	add_child(restore_dialog)
-	decky_dialog = ConfirmationDialog.new()
-	decky_dialog.title = "Install Decky Loader?"
-	decky_dialog.dialog_text = "Decky needs your password once.\nDeckCompanion switches to Desktop Mode and opens the official installer.\nWhen it is done, tap \"Return to Gaming Mode\" on the desktop."
-	decky_dialog.ok_button_text = "Switch and install"
-	decky_dialog.cancel_button_text = "Not now"
-	decky_dialog.min_size = Vector2i(720,260)
-	decky_dialog.confirmed.connect(_start_decky_install)
-	decky_dialog.canceled.connect(_restore_modal_focus)
-	add_child(decky_dialog)
-	proton_remove_dialog = ConfirmationDialog.new()
-	proton_remove_dialog.title = "Remove Proton build?"
-	proton_remove_dialog.ok_button_text = "Remove"
-	proton_remove_dialog.cancel_button_text = "Keep it"
-	proton_remove_dialog.min_size = Vector2i(640,220)
+	decky_dialog = _make_dialog("Install Decky Loader","","Install","Not now")
+	var decky_box: VBoxContainer = decky_dialog.get_meta("box")
+	for i in 2:
+		var field := LineEdit.new()
+		field.secret = true
+		field.custom_minimum_size = Vector2(0,48)
+		field.add_theme_font_size_override("font_size",_px(20))
+		field.placeholder_text = "Deck password" if i == 0 else "Repeat password"
+		field.focus_entered.connect(_open_steam_keyboard)
+		decky_box.add_child(field)
+		decky_fields.append(field)
+	decky_error = _label("",17,WARN)
+	decky_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	decky_error.custom_minimum_size.x = 672
+	decky_box.add_child(decky_error)
+	decky_box.add_child(_label("The keyboard opens by itself. If it doesn't, press STEAM + X.",16,MUTED))
+	decky_dialog.register_text_enter(decky_fields[0])
+	decky_dialog.register_text_enter(decky_fields[1])
+	decky_dialog.confirmed.connect(_submit_decky_password)
+	proton_remove_dialog = _make_dialog("Remove Proton build?","","Remove","Keep it",640)
 	proton_remove_dialog.confirmed.connect(func(): proton_backend.request("proton",["remove",pending_proton_remove,"--force"]))
-	proton_remove_dialog.canceled.connect(_restore_modal_focus)
-	add_child(proton_remove_dialog)
-	remove_dialog = ConfirmationDialog.new()
-	remove_dialog.title = "Remove this game?"
-	remove_dialog.dialog_text = "Removes only the Steam shortcut and library entry after Apply.\nYour game files and save prefix are kept."
-	remove_dialog.ok_button_text = "Remove game"
+	remove_dialog = _make_dialog("Remove this game?","Removes only the Steam shortcut and library entry after Apply. Your game files and save prefix are kept.","Remove game","Keep it")
 	remove_dialog.confirmed.connect(func(): _request("remove-game",[selected.slug]))
-	remove_dialog.canceled.connect(_restore_modal_focus)
-	add_child(remove_dialog)
+
+## Borderless dialog in the app's own style: no window frame or title bar (owner report).
+func _make_dialog(title: String, text: String, ok: String, cancel: String, width := 720) -> ConfirmationDialog:
+	var d := ConfirmationDialog.new()
+	d.borderless = true
+	d.title = title
+	d.ok_button_text = ok
+	d.cancel_button_text = cancel
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation",10)
+	# A fixed content width lets wrapped labels report their real height.
+	box.custom_minimum_size.x = width - 48
+	var heading := _label(title,24,INK)
+	heading.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	heading.custom_minimum_size.x = width - 48
+	box.add_child(heading)
+	var body := _label(text,18,MUTED)
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.custom_minimum_size.x = width - 48
+	box.add_child(body)
+	d.add_child(box)
+	d.set_meta("heading",heading)
+	d.set_meta("body",body)
+	d.set_meta("box",box)
+	d.canceled.connect(_restore_modal_focus)
+	d.visibility_changed.connect(func(): if not d.visible: dim.visible = false)
+	d.min_size = Vector2i(width,0)
+	add_child(d)
+	for button in [d.get_ok_button(), d.get_cancel_button()]:
+		button.custom_minimum_size = Vector2(170,44)
+		button.add_theme_font_size_override("font_size",_px(18))
+	return d
+
+## Size the dialog to its content, centre it and dim the app behind it.
+func _popup(d: ConfirmationDialog) -> void:
+	dim.visible = true
+	d.size = Vector2i(d.min_size.x, 0)
+	d.reset_size()
+	d.popup_centered(Vector2i(d.min_size.x, 0))
+
+func _dialog_text(d: ConfirmationDialog, title: String, text: String) -> void:
+	d.title = title
+	d.get_meta("heading").text = title
+	d.get_meta("body").text = text
 
 func _back_to_steam() -> void:
 	# Steam brings its library back as soon as this non-Steam app exits.
@@ -434,12 +476,25 @@ func _launchers_completed(command: String, data: Dictionary) -> void:
 
 func _decky_completed(_command: String, data: Dictionary) -> void:
 	var action: String = str(decky_backend.get_meta("action",""))
-	if data.has("error"): notice = "Decky: " + str(data.error.message)
+	if data.has("error"):
+		decky_pending_password = ""
+		if str(data.error.code) in ["wrong_password","password_too_short","password_not_set","password_exists","password_required"]:
+			if str(data.error.code) == "password_exists": decky_status["password_set"] = true
+			notice = ""
+			_open_decky_dialog(str(data.error.message) + ".")
+			return
+		notice = "Decky: " + str(data.error.message)
 	elif action == "status": decky_status = data
 	elif action == "plugin-status": plugin_status = data
+	elif action == "set-password":
+		if data.get("password_set",false):
+			decky_status["password_set"] = true
+			_request_decky_secret("install")
+			return
 	elif action in ["install", "install-desktop"]:
 		decky_handoff = data
-		if data.get("switching",false): notice = "Switching to Desktop Mode. The Decky installer opens there."
+		if data.get("steam_restarting",false): notice = "Decky Loader %s installed. Steam restarts now to load it." % str(data.get("version",""))
+		elif data.get("switching",false): notice = "Switching to Desktop Mode. The Decky installer opens there."
 		elif data.get("launched",false): notice = "The Decky installer opened in Konsole. Enter your password there."
 		else: notice = "Open Desktop Mode to install Decky; the installer needs your password."
 	elif action == "plugin-install":
@@ -491,14 +546,67 @@ static func _version_less(a: String, b: String) -> bool:
 	return false
 
 func _confirm_decky() -> void:
-	modal_focus = get_viewport().gui_get_focus_owner()
-	decky_dialog.popup_centered()
-	decky_dialog.get_cancel_button().grab_focus()
+	_open_decky_dialog("")
 
-func _start_decky_install() -> void:
-	# In Game Mode the installer must run on the desktop (it asks for your password there).
-	var game_mode: bool = OS.get_environment("XDG_CURRENT_DESKTOP").to_lower().contains("gamescope") or backend.mock
-	_request_decky("install-desktop" if game_mode else "install")
+func _open_decky_dialog(problem: String) -> void:
+	decky_creating = decky_status.get("password_set") == false
+	var installed: bool = decky_status.get("installed",false)
+	var action := "Update" if installed else "Install"
+	if decky_creating:
+		_dialog_text(decky_dialog,"Create a password for your Deck","SteamOS needs a password for system installs like Decky Loader, and your Deck doesn't have one yet. Choose a password and type it twice; DeckCompanion sets it as your Deck password. You'll need it again for future Decky updates.")
+		decky_dialog.ok_button_text = "Set password and " + action.to_lower()
+	else:
+		_dialog_text(decky_dialog,"%s Decky Loader" % action,"Decky Loader installs as a system service, so SteamOS asks for your Deck password once. DeckCompanion passes it only to the official installer and never stores it.")
+		decky_dialog.ok_button_text = action
+	decky_fields[1].visible = decky_creating
+	for field in decky_fields: field.text = ""
+	decky_error.text = problem
+	decky_error.visible = not problem.is_empty()
+	modal_focus = get_viewport().gui_get_focus_owner()
+	_popup(decky_dialog)
+	decky_fields[0].grab_focus.call_deferred()
+
+## Opens Steam's on-screen keyboard (owner: typing a password must not need STEAM + X).
+## Godot's virtual keyboard does nothing on Linux, so ask the running Steam client.
+func _open_steam_keyboard() -> void:
+	if Time.get_ticks_msec() - keyboard_opened_ms < 1500: return
+	keyboard_opened_ms = Time.get_ticks_msec()
+	keyboard_requests += 1
+	if backend.mock or OS.get_name() != "Linux": return
+	OS.create_process("steam",["-ifrunning","steam://open/keyboard"])
+
+func _submit_decky_password() -> void:
+	var password: String = decky_fields[0].text
+	decky_pending_repeat = decky_fields[1].text
+	for field in decky_fields: field.text = ""
+	if password.length() < 4:
+		_open_decky_dialog("Use at least 4 characters.")
+		return
+	if decky_creating and decky_fields[1].visible and decky_pending_repeat != password:
+		_open_decky_dialog("The two passwords don't match.")
+		return
+	decky_pending_password = password
+	_request_decky_secret("set-password" if decky_creating else "install")
+
+func _request_decky_secret(action: String) -> void:
+	# The password goes to a private file in XDG_RUNTIME_DIR (RAM, user-only); the
+	# engine reads it once and deletes it. It is never passed on the command line.
+	var dir := OS.get_environment("XDG_RUNTIME_DIR")
+	if dir.is_empty(): dir = OS.get_user_data_dir()
+	var path := dir.path_join("deckcompanion-%d.secret" % Time.get_ticks_usec())
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		notice = "Could not prepare the installer."
+		decky_pending_password = ""
+		_render()
+		return
+	file.store_string(decky_pending_password)
+	file.close()
+	if action == "install": decky_pending_password = ""
+	notice = "Setting your Deck password…" if action == "set-password" else "Installing Decky Loader…"
+	decky_backend.set_meta("action",action)
+	decky_backend.request("decky",[action,"--password-file",path])
+	_render()
 
 ## Engine instructions may be a list or one string; never iterate a string per character.
 static func _lines(value: Variant) -> Array:
@@ -510,7 +618,7 @@ func launchers_busy() -> bool:
 
 func _confirm_restore() -> void:
 	modal_focus = get_viewport().gui_get_focus_owner()
-	restore_dialog.popup_centered()
+	_popup(restore_dialog)
 	restore_dialog.get_cancel_button().grab_focus()
 
 func _restore_modal_focus() -> void:
@@ -519,7 +627,7 @@ func _restore_modal_focus() -> void:
 func _confirm() -> void:
 	if backend.busy or status.get("pending",[]).is_empty(): return
 	modal_focus = get_viewport().gui_get_focus_owner()
-	dialog.popup_centered()
+	_popup(dialog)
 	dialog.get_cancel_button().grab_focus()
 
 func _request(command: String, args: Array = []) -> void:
@@ -932,7 +1040,7 @@ func _detail_screen() -> void:
 	var enabled: bool = selected.get("pending") == "enable" or (selected.get("pending") == null and selected.enabled)
 	if selected.get("kind") == "non_steam":
 		var remove_row := _setting_row(setup,"Non-Steam game","Runs through umu-launcher with its own save prefix.")
-		_chip("Remove game",func(): modal_focus = get_viewport().gui_get_focus_owner(); remove_dialog.popup_centered(); remove_dialog.get_cancel_button().grab_focus(),remove_row,"remove-game",false,WARN).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		_chip("Remove game",func(): modal_focus = get_viewport().gui_get_focus_owner(); _popup(remove_dialog); remove_dialog.get_cancel_button().grab_focus(),remove_row,"remove-game",false,WARN).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	else:
 		var takeover: String = str(selected.get("takeover","n/a"))
 		if selected.get("kind") == "steam_shortcut" and takeover == "n/a":
@@ -1249,9 +1357,9 @@ func _update_status(column: Node) -> void:
 
 func _confirm_proton_remove(name: String) -> void:
 	pending_proton_remove = name
-	proton_remove_dialog.dialog_text = "Remove %s from this Deck?\nGames set to use it fall back to the automatic choice." % name
+	_dialog_text(proton_remove_dialog,"Remove Proton build?","Remove %s from this Deck? Games set to use it fall back to the automatic choice." % name)
 	modal_focus = get_viewport().gui_get_focus_owner()
-	proton_remove_dialog.popup_centered()
+	_popup(proton_remove_dialog)
 	proton_remove_dialog.get_cancel_button().grab_focus()
 
 func _toggle_game() -> void:

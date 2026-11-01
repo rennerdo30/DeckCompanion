@@ -13,7 +13,8 @@ from . import net, steam
 from .common import Error, atomic, read_json, state, write_json
 
 RELEASE_URL = "https://api.github.com/repos/SteamDeckHomebrew/decky-loader/releases/latest"
-INSTALL_COMMAND = "curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh | sh"
+INSTALLER_URL = "https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh"
+INSTALL_COMMAND = f"curl -L {INSTALLER_URL} | sh"
 CACHE_SECONDS = 6 * 3600
 PLUGIN_FILES = ("main.py", "plugin.json", "package.json", "dist/index.js", "LICENSE", "THIRD_PARTY_NOTICES.md", "sources/decky-api.tar.gz")
 PLUGIN_RELEASES = "https://api.github.com/repos/rennerdo30/DeckCompanion/releases?per_page=100"
@@ -79,7 +80,143 @@ def status(paths):
                 service = value
         except (Error, OSError):
             pass
-    return {"installed": installed(), "version": version, "service": service, "latest": latest(paths)}
+    return {"installed": installed(), "version": version, "service": service, "latest": latest(paths),
+            "password_set": password_set()}
+
+
+def password_set():
+    """True/False when `passwd -S` reports the user's password state, None if unknown.
+
+    Decky's installer needs sudo; SteamOS ships the deck user without a password."""
+    if not sys.platform.startswith("linux") or not shutil.which("passwd"):
+        return None
+    try:
+        output = steam.run(["passwd", "-S", os.environ.get("USER", "deck")], timeout=5).decode(errors="replace").split()
+    except (Error, OSError):
+        return None
+    return output[1] == "P" if len(output) > 1 else None
+
+
+def _read_secret(password_file):
+    source = Path(password_file)
+    try:
+        return source.read_text(encoding="utf-8").rstrip("\n")
+    except OSError as exc:
+        raise Error("password_required", "Enter a password") from exc
+    finally:
+        source.unlink(missing_ok=True)
+
+
+def drive_passwd(read, write, password, deadline):
+    """Answer passwd's prompts on a pseudo-terminal. An account without a password
+    gets an empty answer for "Current password"; new/retype prompts get the password."""
+    buffer = ""
+    answered = 0
+    while time.monotonic() < deadline:
+        chunk = read()
+        if chunk is None:
+            return answered
+        buffer += chunk
+        prompt = buffer.lower().rstrip()
+        if prompt.endswith(":"):
+            if "current" in prompt or "(current)" in prompt:
+                write("\n")
+            elif "new" in prompt or "retype" in prompt or "repeat" in prompt:
+                write(password + "\n")
+                answered += 1
+            buffer = ""
+    raise Error("password_timeout", "Setting the password timed out")
+
+
+def set_password(password_file):
+    """Create the first password for this account from inside DeckCompanion.
+
+    SteamOS ships the deck user without a password, but Decky's installer needs sudo.
+    Only for accounts without a password (changing one would need the old password).
+    passwd runs on a pseudo-terminal; the password is never logged or stored."""
+    password = _read_secret(password_file)
+    if len(password) < 4:
+        raise Error("password_too_short", "Use at least 4 characters")
+    if password_set() is not False:
+        raise Error("password_exists", "This Deck already has a password; enter it instead")
+    import pty
+    import select
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execvp("passwd", ["passwd"])
+    def read():
+        ready, _, _ = select.select([fd], [], [], 0.5)
+        if not ready:
+            return ""
+        try:
+            data = os.read(fd, 1024)
+        except OSError:
+            return None
+        return data.decode(errors="replace") if data else None
+    try:
+        answered = drive_passwd(read, lambda text: os.write(fd, text.encode()), password, time.monotonic() + 20)
+    finally:
+        password = None
+        _, status = os.waitpid(pid, 0)
+        os.close(fd)
+    if os.waitstatus_to_exitcode(status) != 0 or answered < 2:
+        raise Error("password_not_set", "SteamOS did not accept that password; try a longer one")
+    return {"password_set": True}
+
+
+def install_with_password(paths, password_file):
+    """Install or update Decky Loader inside DeckCompanion, without Desktop Mode.
+
+    The official installer must run as root (it uses SUDO_USER). The UI writes the
+    password to a private file in XDG_RUNTIME_DIR (tmpfs, mode 0700 directory); it is
+    read once, deleted immediately and only ever passed to sudo on stdin. It is never
+    logged or stored (owner request, 2026-11-01)."""
+    source = Path(password_file)
+    try:
+        password = source.read_text(encoding="utf-8").rstrip("\n")
+    except OSError as exc:
+        raise Error("password_required", "Enter your Deck password to install Decky") from exc
+    finally:
+        source.unlink(missing_ok=True)
+    if not password:
+        raise Error("password_required", "Enter your Deck password to install Decky")
+    if not sys.platform.startswith("linux") or not shutil.which("sudo"):
+        raise Error("unsupported", "Decky installs only on SteamOS / Linux")
+    sudo = shutil.which("sudo")
+    check = subprocess.run([sudo, "-S", "-k", "-p", "", "true"], input=password + "\n", text=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+    if check.returncode:
+        raise Error("wrong_password", "That password was not accepted")
+    script = paths.data / "run" / "decky-install_release.sh"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    net.fetch(INSTALLER_URL, script, net.Budget(30), max_bytes=1024 * 1024)
+    log = paths.data / "logs" / "decky-install.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("w", encoding="utf-8") as output:
+        proc = subprocess.run([sudo, "-S", "-k", "-p", "", "sh", str(script)], input=password + "\n", text=True,
+                              stdout=output, stderr=subprocess.STDOUT, timeout=600)
+    password = None
+    if proc.returncode:
+        raise Error("decky_install_failed", f"The Decky installer stopped with code {proc.returncode}; see {log}")
+    restart_steam()
+    version_file = Path.home() / "homebrew/services/.loader.version"
+    version = version_file.read_text(encoding="utf-8").strip() if version_file.is_file() else None
+    return {"installed": installed(), "version": version, "steam_restarting": True, "log": str(log)}
+
+
+def restart_steam():
+    """Decky loads after a Steam restart. Game Mode respawns Steam by itself; the
+    fallback starts it again on the desktop. Detached so it survives this process."""
+    runner = shutil.which("systemd-run")
+    script = "steam -shutdown; sleep 12; pgrep -x steam >/dev/null || (steam -silent >/dev/null 2>&1 &)"
+    command = ["sh", "-c", script]
+    if runner:
+        command = [runner, "--user", "--collect", "--unit=deckcompanion-steam-restart-" + str(time.time_ns()),
+                   "--property=RuntimeMaxSec=180", "--"] + command
+    try:
+        steam.run(command, timeout=10)
+    except (Error, OSError):
+        pass
 
 
 def install():
