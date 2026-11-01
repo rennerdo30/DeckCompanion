@@ -83,50 +83,96 @@ func set_name(value: String) -> void:
 
 func render() -> void:
 	var heading: HBoxContainer = host._row(host.body)
-	host._button("‹  Back",back,heading,"add-back")
-	heading.add_child(host._label("Add a game",28))
+	host._chip("‹  Back",back,heading,"add-back")
+	var title: Label = host._label("Add a game",26)
+	title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	heading.add_child(title)
+	if not exe.is_empty():
+		_name_form()
+		return
+	var columns: HBoxContainer = host._row(host.body)
+	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	columns.add_theme_constant_override("separation",14)
+	# Left: launcher presets (installed through umu with their own prefix).
+	var left := DragScroll.new()
+	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	left.follow_focus = true
+	columns.add_child(left)
+	var launchers: VBoxContainer = host._card(_column(left),"Install a store launcher")
+	host._paragraph(launchers,"Each launcher gets its own prefix and a Steam library entry. Sign in after it installs.")
+	if host.launchers_data.is_empty(): host._paragraph(launchers,"Loading launchers…")
+	for launcher in host.launchers_data: _launcher_row(launchers,launcher)
+	# Right: any Windows .exe.
+	var right := DragScroll.new()
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	right.follow_focus = true
+	columns.add_child(right)
+	host.screen_scroll = right
+	var browser: VBoxContainer = host._card(_column(right),"Add a Windows game (.exe)")
+	var roots := HFlowContainer.new()
+	roots.add_theme_constant_override("h_separation",6)
+	roots.add_theme_constant_override("v_separation",6)
+	browser.add_child(roots)
+	var places := locations()
+	for path in places: host._chip("Home" if path == places[0] else str(path).get_file(),browse.bind(path),roots,"location:"+path,folder == path)
+	host._paragraph(browser,folder,host.MINT)
+	host._chip("↑  Parent folder",browse.bind(folder.get_base_dir()),browser,"add-up")
+	var items := entries()
+	if not problem.is_empty(): host._paragraph(browser,problem)
+	elif items.is_empty(): host._paragraph(browser,"No folders or .exe files here. Try another location.")
+	for item in items:
+		var button: Button = host._button(("▸  " if item.directory else "＋  ") + item.name,choose.bind(item),browser,"file:"+item.name)
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+
+func _column(scroll: ScrollContainer) -> VBoxContainer:
+	var column := VBoxContainer.new()
+	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(column)
+	return column
+
+func _launcher_row(parent: Node, launcher: Dictionary) -> void:
+	var state: String = str(launcher.get("state","not_installed"))
+	var job: Variant = launcher.get("job")
+	var line: String = {"not_installed": "Not installed" + ("" if launcher.get("unattended",false) else "  ·  the installer may ask you to click through"),
+		"installing": "Installing  ·  " + (str(job.get("phase","")).capitalize() if job is Dictionary else "starting"),
+		"installed": "Installed  ·  in your Steam library",
+		"failed": "Failed: " + (str(job.get("error","")) if job is Dictionary else "unknown error")}.get(state,state)
+	var row: HBoxContainer = host._setting_row(parent,str(launcher.get("name","Launcher")),line)
+	var id: String = str(launcher.get("id",""))
+	match state:
+		"installed": host._chip("Remove",func(): host.launcher_backend.request("launcher",["remove",id]),row,"launcher-remove:"+id,false,host.WARN,not host.launcher_backend.busy)
+		"installing": host._badge(row,"WORKING",host.CREAM).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		_: host._chip("Retry" if state == "failed" else "Install",func(): host.launcher_backend.request("launcher",["install",id]),row,"launcher:"+id,false,host.MINT,not host.launcher_backend.busy and not host.launchers_busy())
+
+func _name_form() -> void:
 	var scroll := DragScroll.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.follow_focus = true
 	host.body.add_child(scroll)
 	host.screen_scroll = scroll
-	var column := VBoxContainer.new()
-	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(column)
-	if exe.is_empty():
-		host._paragraph(column,"Choose a Windows .exe  ·  Folders and mounted drives are available below.")
-		var roots := GridContainer.new()
-		roots.columns = 4
-		column.add_child(roots)
-		var places := locations()
-		for path in places: host._button("Home" if path == places[0] else str(path).get_file(),browse.bind(path),roots,"location:"+path)
-		host._paragraph(column,folder,host.MINT)
-		host._button("↑  Parent folder",browse.bind(folder.get_base_dir()),column,"add-up")
-		var items := entries()
-		if not problem.is_empty(): host._paragraph(column,problem)
-		elif items.is_empty(): host._paragraph(column,"No folders or .exe files here. Try another location.")
-		for item in items:
-			host._button(("▸  " if item.directory else "＋  ") + item.name,choose.bind(item),column,"file:"+item.name)
-		return
-	var card: VBoxContainer = host._card(column)
-	host._paragraph(card,"WINDOWS GAME  /  NON-STEAM",host.MINT)
+	var column := _column(scroll)
+	var card: VBoxContainer = host._card(column,"Windows game  /  non-Steam")
 	host._paragraph(card,exe)
 	name_input = LineEdit.new()
 	name_input.text = game_name
 	name_input.max_length = 128
 	name_input.custom_minimum_size.y = 48
+	name_input.add_theme_font_size_override("font_size",20)
 	name_input.placeholder_text = "Game name"
 	name_input.set_meta("focus_id","add-name")
 	name_input.text_changed.connect(set_name)
 	card.add_child(name_input)
 	host.controls.append(name_input)
 	var row: HBoxContainer = host._row(card)
+	row.add_theme_constant_override("separation",6)
 	for option in ["none","egs","gog"]:
-		host._button(({"none":"Standalone","egs":"Epic Games","gog":"GOG"}[option]) + ("  ✓" if store == option else ""),func(): store = option; host._render(),row,"store:"+option)
-	host._paragraph(card,"Adds a Steam library shortcut with its own save prefix. Apply once to update Steam. Your original files stay in place.")
+		host._chip({"none":"Standalone","egs":"Epic Games","gog":"GOG"}[option],func(): store = option; host._render(),row,"store:"+option,store == option)
+	host._paragraph(card,"Adds a Steam library entry with its own save prefix. Apply once to update Steam. Your original files stay in place.")
 	var actions: HBoxContainer = host._row(card)
-	host._button("Add to library",submit,actions,"add-submit",not game_name.strip_edges().is_empty())
-	host._button("Hide keyboard" if keys else "Edit name with controller",func(): keys = not keys; host._render(),actions,"add-keyboard")
+	host._chip("Add to library",submit,actions,"add-submit",true,host.MINT,not game_name.strip_edges().is_empty())
+	host._chip("Hide keyboard" if keys else "Edit name with controller",func(): keys = not keys; host._render(),actions,"add-keyboard")
 	if keys:
 		var grid := GridContainer.new()
 		grid.columns = 10

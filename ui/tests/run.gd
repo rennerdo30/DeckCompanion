@@ -178,6 +178,15 @@ func nonsteam_checks(ui: Node) -> void:
 	start.pressed.emit()
 	await process_frame
 	check(ui.add_flow.folder == "/home/deck","browser starts at Home")
+	# DC-30: store launcher presets beside the .exe browser.
+	await create_timer(0.3).timeout
+	check(ui.launchers_data.size() == 5 and control(ui,"launcher:epic") != null and control(ui,"launcher-remove:gog") != null,"Add game lists launcher presets with install/remove")
+	check(control(ui,"launcher:battlenet") != null and control(ui,"launcher:battlenet").text == "Retry","failed launcher offers Retry")
+	control(ui,"launcher:epic").pressed.emit()
+	for i in 8:
+		await create_timer(0.3).timeout
+		ui.launcher_poll = 2.0
+	check(ui.launchers_data.filter(func(l): return l.id == "epic")[0].state == "installed","launcher install is polled until installed")
 	check(control(ui,"file:Games") != null,"browser exposes controller-focusable folders")
 	control(ui,"file:Games").pressed.emit()
 	await process_frame

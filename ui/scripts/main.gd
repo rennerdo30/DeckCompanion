@@ -13,6 +13,9 @@ var restore_dialog: ConfirmationDialog
 var proton_remove_dialog: ConfirmationDialog
 var pending_proton_remove := ""
 var available_data: Dictionary = {}
+var launcher_backend: Node
+var launchers_data: Array = []
+var launcher_poll := 0.0
 const UI_VERSION := "0.4.4"
 # Design tokens (shared with the logo and Steam artwork palette).
 const INK := Color("e7f1f4")
@@ -85,6 +88,9 @@ func _ready() -> void:
 	update_backend = Backend.new()
 	add_child(update_backend)
 	update_backend.completed.connect(_update_completed)
+	launcher_backend = Backend.new()
+	add_child(launcher_backend)
+	launcher_backend.completed.connect(_launchers_completed)
 	proton_backend = Backend.new()
 	add_child(proton_backend)
 	proton_backend.completed.connect(_proton_completed)
@@ -338,6 +344,18 @@ func _save_ui_config() -> void:
 	ui_config.set_value("library","sort_by_name",sort_by_name)
 	ui_config.save("user://ui.cfg")
 
+func _launchers_completed(command: String, data: Dictionary) -> void:
+	if data.has("error"): notice = "Launchers: " + str(data.error.message)
+	elif command == "launchers": launchers_data = data.launchers
+	else:
+		if data.get("scheduled",false): notice = "Installing %s in the background. You can keep using DeckCompanion." % data.launcher.name
+		elif data.get("removed",false): notice = "%s removed. Its prefix and saves are kept." % data.launcher.name
+		launcher_backend.request.call_deferred("launchers")
+	if add_flow != null: _render()
+
+func launchers_busy() -> bool:
+	return launchers_data.any(func(l): return l.get("state") == "installing")
+
 func _confirm_restore() -> void:
 	modal_focus = get_viewport().gui_get_focus_owner()
 	restore_dialog.popup_centered()
@@ -518,7 +536,7 @@ func _games_screen() -> void:
 	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	toolbar.add_child(push)
 	_chip("Sort: " + ("A–Z" if sort_by_name else "Recent"),_toggle_sort,toolbar,"sort")
-	_chip("＋  Add game",func(): notice = ""; error = ""; add_flow = AddGame.new(self); _render(),toolbar,"add-game",true,CREAM)
+	_chip("＋  Add game",func(): notice = ""; error = ""; add_flow = AddGame.new(self); launcher_backend.request("launchers"); _render(),toolbar,"add-game",true,CREAM)
 	var library := games if settings.get("show_games_without_recipe",true) else games.filter(func(game): return game.has_recipe or game.get("kind") == "non_steam")
 	var visible := Nav.sort_games(Nav.visible_games(library,filter),sort_by_name)
 	# Land on the most relevant game, not on the filter row.
@@ -1119,6 +1137,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 func _process(delta: float) -> void:
+	launcher_poll += delta
+	if launcher_poll >= 1.5 and add_flow != null and launchers_busy() and not launcher_backend.busy:
+		launcher_poll = 0.0
+		launcher_backend.request("launchers")
 	proton_poll += delta
 	if proton_poll >= 1.0 and proton_data.get("active",false) and not proton_backend.busy:
 		proton_poll = 0.0
@@ -1139,7 +1161,7 @@ func _capture_if_requested() -> void:
 		if arg.begins_with("--capture-dir="): directory = arg.trim_prefix("--capture-dir=")
 	if directory.is_empty() or not backend.mock: return
 	DirAccess.make_dir_recursive_absolute(directory)
-	for screen in ["games","detail","updates","settings"]:
+	for screen in ["games","detail","updates","settings","add"]:
 		if screen == "games":
 			await get_tree().create_timer(0.6).timeout
 			for control in controls:
@@ -1149,6 +1171,11 @@ func _capture_if_requested() -> void:
 			_switch_tab(1)
 			_request("update")
 		if screen == "settings": _switch_tab(2)
+		if screen == "add":
+			_switch_tab(0)
+			add_flow = AddGame.new(self)
+			launcher_backend.request("launchers")
+			_render()
 		await get_tree().create_timer(1.0).timeout
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png(directory.path_join(screen+".png"))

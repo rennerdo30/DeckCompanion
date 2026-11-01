@@ -7,6 +7,13 @@ var games: Array = []
 var default_tool := false
 var takeover_snapshot: Variant = {"taken_at":"2026-11-01T13:31:00+00:00","games":6}
 var restore_pending := false
+var launcher_ticks := 0
+var mock_launchers: Array = [
+	{"id":"epic","name":"Epic Games Launcher","store":"egs","state":"not_installed","installed":false,"unattended":true,"warnings":[],"job":null},
+	{"id":"gog","name":"GOG Galaxy","store":"gog","state":"installed","installed":true,"unattended":false,"warnings":[],"job":null},
+	{"id":"ea","name":"EA app","store":"ea","state":"not_installed","installed":false,"unattended":false,"warnings":[],"job":null},
+	{"id":"ubisoft","name":"Ubisoft Connect","store":"ubisoft","state":"not_installed","installed":false,"unattended":true,"warnings":[],"job":null},
+	{"id":"battlenet","name":"Battle.net","store":"battlenet","state":"failed","installed":false,"unattended":false,"warnings":[],"job":{"active":false,"phase":"failed","error":"Installer exited with code 1"}}]
 var default_pending = null
 var removed_pending: Array = []
 var worker: Thread
@@ -71,6 +78,8 @@ static func parse_response(raw: String, exit_code: int, command: String) -> Dict
 					if not build is Dictionary or not build.get("name") is String or not build.get("path") is String: valid = false
 		"update": valid = data.get("scheduled",false) or (data.get("engine") is Dictionary and data.get("index") is Dictionary and data.engine.get("current") is String and data.engine.get("available") is String and (data.index.get("fetched_at") is String or data.index.get("fetched_at") == null))
 		"apply": valid = data.get("applied") is Array and data.get("steam_restarted") is bool
+		"launchers": valid = data.get("launchers") is Array
+		"launcher": valid = data.get("launcher") is Dictionary or data.has("removed")
 		"restore-all": valid = (data.get("restoring") is int or data.get("restoring") is float) and data.get("pending") is Array
 		"add-game": valid = valid_game(data) and data.get("kind") == "non_steam" and data.get("slug") is String
 		"remove-game": valid = data.get("removed") == true and data.get("prefix_preserved") == true
@@ -190,6 +199,28 @@ func mock_response(command: String, args: Array = []) -> Dictionary:
 	if scenario == "offline" and command == "update": return fixture("offline")
 	if command == "games": return {"games": [] if scenario == "empty" else games.duplicate(true)}
 	if command == "update": return fixture("update")
+	if command == "launchers":
+		for launcher in mock_launchers:
+			if launcher.state == "installing":
+				launcher_ticks += 1
+				launcher.job.phase = ["downloading","installing","registering"][mini(launcher_ticks-1,2)]
+				if launcher_ticks >= 4:
+					launcher.state = "installed"
+					launcher.installed = true
+					launcher.job = null
+					launcher_ticks = 0
+		return {"launchers": mock_launchers.duplicate(true)}
+	if command == "launcher":
+		for launcher in mock_launchers:
+			if launcher.id != args[1]: continue
+			if args[0] == "install":
+				launcher.state = "installing"
+				launcher.job = {"active": true, "phase": "scheduled", "error": null}
+				return {"scheduled": true, "launcher": launcher.duplicate(true)}
+			launcher.state = "not_installed"
+			launcher.installed = false
+			return {"removed": true, "launcher": launcher.duplicate(true)}
+		return failure("NOT_FOUND", "Unknown launcher")
 	if command == "restore-all":
 		var count: int = int(takeover_snapshot.get("games",0)) if takeover_snapshot is Dictionary else 0
 		settings.takeover_all = false
