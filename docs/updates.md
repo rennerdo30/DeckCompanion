@@ -47,5 +47,10 @@ outlives temporary extraction cleanup. The desktop asset opens Konsole and runs
 the same pipe with timeouts. Install queues the shortcut while Steam runs;
 only apply writes Steam VDF files. See the [CLI lifecycle](cli.md).
 The builder never reads or modifies the sibling's `ui/` tree.
+It also excludes all `third_party/` trees, including the development-only
+umu-protonfixes submodule and its nested dependencies. Release builds must not
+initialize submodules recursively. Development/CI coverage uses only
+`git submodule update --init third_party/umu-protonfixes`; see
+[the pin and loader test boundary](protonfixes.md).
 
 Not verified on hardware. Tests use fake tarballs and mocked release responses.

@@ -86,6 +86,24 @@ Everything lives under your home directory, surviving SteamOS system updates.
 All roots can be overridden for tests. See [CLI contract](docs/cli.md),
 [recipes](docs/recipes.md), and [updates/signing design](docs/updates.md).
 
+## How fixes work
+
+GE-Proton supplies upstream protonfixes. For a recipe-managed app, DeckCompanion
+generates `~/.config/protonfixes/localfixes/<appid>.py`, forwarding upstream's
+early/main hooks first, then applying the DeckCompanion recipe steps. Wine
+installs and registry steps run once per prefix and recipe revision, retrying
+after failure; DLL overrides and environment settings apply on each launch.
+Foreign localfixes are preserved. Mods and initial settings are handled by the
+engine when the prefix exists, separately from the Wine hooks.
+
+Generic Wine fixes should be contributed to
+[umu-protonfixes](https://github.com/Open-Wine-Components/umu-protonfixes), with
+an appid, reproducible problem, minimal fix and Proton launch evidence. Recipes
+retain mod delivery and user choices. Our pinned development submodule tests the
+real upstream loader without shipping another copy. See
+[pin, tests and contribution details](docs/protonfixes.md). Runtime behavior
+remains **not verified on hardware**.
+
 ## Migration from the 2022 prototype
 
 The root `DeckCompanion` and `toolmanifest.vdf` command path remain. Old git-clone
@@ -114,6 +132,10 @@ downloaded Proton runtimes and unrelated shortcuts are never removed.
 Set `PYTHONPATH=src` and use `python3 -m deckcompanion`. Pytest is dev-only:
 `python3 -m pytest -q tests`. Tests use temporary trees, fake archives and mocked
 network/process calls. No Steam or remote device needed.
+For upstream-loader coverage in development or CI, first run
+`git submodule update --init third_party/umu-protonfixes` (never recursive).
+Without it, those tests skip cleanly. Release builds do not need the submodule
+and always exclude `third_party/` and its separately licensed nested dependencies.
 `python3 scripts/build_release.py --output dist` resolves API metadata and produces
 engine/index/checksums and installer assets locally; nothing publishes.
 `--offline` produces a development bundle with unresolved source mods (not installable

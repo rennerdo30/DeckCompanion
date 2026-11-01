@@ -86,7 +86,9 @@ def build(output, version=__version__, offline=False):
             entries[path.stem] = {"toml": text, "sha256": hashlib.sha256(text.encode()).hexdigest()}
         with tarfile.open(archive, "w:gz") as tar:
             def include(info):
-                if "__pycache__" in info.name or info.name.endswith(".pyc"):
+                # Development-only upstream sources and their nested dependencies never ship,
+                # even if a future payload root includes a third_party directory.
+                if "third_party" in Path(info.name).parts or "__pycache__" in info.name or info.name.endswith(".pyc"):
                     return None
                 if info.name in ("compat/DeckCompanion", "bin/deckcompanion-ui", "install.sh", "uninstall.sh", "DeckCompanion-Installer.desktop"):
                     info.mode = 0o755

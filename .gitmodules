@@ -1,0 +1,3 @@
+[submodule "third_party/umu-protonfixes"]
+	path = third_party/umu-protonfixes
+	url = https://github.com/Open-Wine-Components/umu-protonfixes.git
