@@ -103,8 +103,10 @@ func run() -> void:
 	ui.status["pending"] = [{"appid":str(first_game.appid),"action":"enable"},{"appid":"2506537342","action":"remove_shortcut"},{"appid":"3748988868","action":"remove_shortcut"},{"action":"default_on"}]
 	ui._confirm()
 	await create_timer(0.2).timeout
-	var listed: String = ui.dialog.get_meta("list").text
-	check(ui.dialog.visible and listed.contains(str(first_game.name) + ": run through DeckCompanion") and listed.contains("Remove 2 old DeckCompanion shortcuts") and listed.contains("default for new games") and ui.dialog.get_meta("heading").text.begins_with("Apply 4 changes"),"Apply dialog names every waiting change")
+	var listed := "\n".join(ui._pending_lines())
+	var rows: Array = ui.dialog.get_meta("list").find_children("*","Label",true,false)
+	check(ui.dialog.visible and listed.contains("Run through DeckCompanion: " + str(first_game.name)) and listed.contains("Remove: 2 old DeckCompanion shortcuts") and listed.contains("DeckCompanion for new games") and ui.dialog.get_meta("heading").text.begins_with("Apply 4 changes"),"Apply dialog names every waiting change")
+	check(rows.all(func(l): return l.autowrap_mode == TextServer.AUTOWRAP_OFF) and rows.any(func(l): return l.text.begins_with("RUN THROUGH DECKCOMPANION")),"change list is grouped with single-line rows (no wrapping)")
 	ui.dialog.hide()
 	ui.status["pending"] = saved_pending
 	ui._update_status_chip()

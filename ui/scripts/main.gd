@@ -32,7 +32,7 @@ var decky_pending_repeat := ""
 var launcher_backend: Node
 var launchers_data: Array = []
 var launcher_poll := 0.0
-const UI_VERSION := "0.4.10"
+const UI_VERSION := "0.4.11"
 # Design tokens (shared with the logo and Steam artwork palette).
 var INK: Color = Color("e7f1f4")
 var MUTED: Color = Color("8fa6b2")
@@ -384,9 +384,9 @@ func _build_shell() -> void:
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	dim.visible = false
 	add_child(dim)
-	dialog = _make_dialog("Apply changes and restart Steam?","Steam closes and restarts to apply your changes, and DeckCompanion closes with it.\nSave and quit any running game first.","Apply and restart","Keep editing")
-	var change_list := _label("",18,INK)
-	change_list.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	dialog = _make_dialog("Apply changes and restart Steam?","Steam restarts to apply them and DeckCompanion closes with it. Save and quit any running game first.","Apply and restart","Keep editing")
+	var change_list := VBoxContainer.new()
+	change_list.add_theme_constant_override("separation",2)
 	change_list.custom_minimum_size.x = 672
 	var apply_box: VBoxContainer = dialog.get_meta("box")
 	apply_box.add_child(change_list)
@@ -721,44 +721,104 @@ func _restore_modal_focus() -> void:
 
 func _confirm() -> void:
 	if backend.busy or status.get("pending",[]).is_empty(): return
-	var lines := _pending_lines()
-	var shown := lines.slice(0,8)
-	if lines.size() > shown.size(): shown.append("…and %d more" % (lines.size() - shown.size()))
-	dialog.get_meta("list").text = "\n".join(shown.map(func(l): return "•  " + l))
+	_fill_change_list(dialog.get_meta("list"))
 	dialog.get_meta("heading").text = "Apply %d change%s and restart Steam?" % [status.pending.size(),"" if status.pending.size() == 1 else "s"]
 	modal_focus = get_viewport().gui_get_focus_owner()
 	_popup(dialog)
 	dialog.get_cancel_button().grab_focus()
 
-## Plain-words list of what Apply will change, one line per change (old
-## DeckCompanion shortcuts are grouped into one line).
-func _pending_lines() -> Array:
+## What Apply will change, grouped by kind: [{title, rows:[{name, detail}]}].
+## Old DeckCompanion shortcuts collapse into one row.
+func _pending_groups() -> Array:
 	var names := {}
 	for game in games:
 		names[str(game.get("appid",""))] = game
 		if game.get("slug") != null: names[str(game.slug)] = game
-	var lines: Array = []
+	var order := ["Run through DeckCompanion","Back to the previous tool","Steam default","Add to your Steam library","Remove from your Steam library","Remove"]
+	var groups := {}
 	var old_shortcuts := 0
 	for item in status.get("pending",[]):
 		var game: Dictionary = names.get(str(item.get("appid",item.get("slug",""))),{})
 		var title := str(game.get("name","App " + str(item.get("appid",item.get("slug","")))))
-		if title.length() > 42: title = title.left(40) + "…"
 		var before := str(game.get("previous_mapping","")) if game.get("previous_mapping") != null else ""
+		var group := ""
+		var row := {"name": title, "detail": ""}
 		match str(item.get("action","")):
-			"enable": lines.append("%s: run through DeckCompanion" % title)
-			"disable": lines.append("%s: back to %s" % [title,before if before != "" else "Steam's own setting"])
-			"restore": lines.append("%s: back to %s" % [title,before if before != "" else "its previous tool"])
-			"restore_default": lines.append("Steam's default tool: back to your previous choice")
-			"default_on": lines.append("Make DeckCompanion Steam's default for new games")
-			"default_off": lines.append("Stop using DeckCompanion as Steam's default")
-			"add": lines.append("Add %s to your Steam library" % title)
-			"remove": lines.append("Remove %s from your Steam library (files are kept)" % title)
+			"enable": group = order[0]
+			"disable", "restore":
+				group = order[1]
+				row.detail = before if before != "" else "Steam's own setting"
+			"restore_default":
+				group = order[2]
+				row = {"name": "Back to your previous default", "detail": ""}
+			"default_on":
+				group = order[2]
+				row = {"name": "DeckCompanion for new games", "detail": ""}
+			"default_off":
+				group = order[2]
+				row = {"name": "Stop using DeckCompanion for new games", "detail": ""}
+			"add": group = order[3]
+			"remove":
+				group = order[4]
+				row.detail = "files are kept"
 			"remove_shortcut":
-				if game.is_empty(): old_shortcuts += 1
-				else: lines.append("Remove the Steam shortcut for %s" % title)
-			_: lines.append("%s: %s" % [title,str(item.get("action","")).replace("_"," ")])
+				if game.is_empty():
+					old_shortcuts += 1
+					continue
+				group = order[5]
+				row.detail = "Steam shortcut"
+			_:
+				group = "Other"
+				row.detail = str(item.get("action","")).replace("_"," ")
+		if not groups.has(group): groups[group] = []
+		groups[group].append(row)
 	if old_shortcuts > 0:
-		lines.append("Remove %d old DeckCompanion shortcut%s left over from earlier installs" % [old_shortcuts,"" if old_shortcuts == 1 else "s"])
+		if not groups.has(order[5]): groups[order[5]] = []
+		groups[order[5]].append({"name": "%d old DeckCompanion shortcut%s" % [old_shortcuts,"" if old_shortcuts == 1 else "s"], "detail": "from earlier installs"})
+	var result: Array = []
+	for title in order + ["Other"]:
+		if groups.has(title): result.append({"title": title, "rows": groups[title]})
+	return result
+
+## One short heading per group, then one single-line row per change; long names
+## end in "…" instead of wrapping. At most 8 rows, then "+N more".
+func _fill_change_list(list: VBoxContainer) -> void:
+	for child in list.get_children():
+		list.remove_child(child)
+		child.queue_free()
+	var shown := 0
+	var hidden := 0
+	for group in _pending_groups():
+		if shown >= 8:
+			hidden += group.rows.size()
+			continue
+		var heading := _label(str(group.title).to_upper() + "  ·  %d" % group.rows.size(),15,MINT)
+		if list.get_child_count() > 0: heading.custom_minimum_size.y = 34
+		heading.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+		list.add_child(heading)
+		for row in group.rows:
+			if shown >= 8:
+				hidden += 1
+				continue
+			shown += 1
+			var line := HBoxContainer.new()
+			line.add_theme_constant_override("separation",12)
+			var name_label := _label(str(row.name),19,INK)
+			name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+			name_label.clip_text = true
+			line.add_child(name_label)
+			if str(row.detail) != "":
+				line.add_child(_label(str(row.detail),16,MUTED))
+			list.add_child(line)
+	if hidden > 0: list.add_child(_label("+%d more" % hidden,16,MUTED))
+
+## Flat plain-words lines (tests, logs): "Group: name (detail)".
+func _pending_lines() -> Array:
+	var lines: Array = []
+	for group in _pending_groups():
+		for row in group.rows:
+			lines.append("%s: %s%s" % [group.title,row.name," (%s)" % row.detail if str(row.detail) != "" else ""])
 	return lines
 
 func _request(command: String, args: Array = []) -> void:
