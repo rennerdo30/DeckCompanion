@@ -322,10 +322,86 @@ def shortcut_field(entry, key, default=None):
 
 
 def shortcut_owned(paths, entry):
-    exe, unsigned = shortcut_identity(paths)
+    _, unsigned = shortcut_identity(paths)
     return (shortcut_value("appid", shortcut_field(entry, "appid")) == unsigned or
-            (shortcut_field(entry, "AppName") == "DeckCompanion" and
-             shortcut_value("Exe", shortcut_field(entry, "Exe")) == shortcut_value("Exe", exe)))
+            shortcut_ui_path(paths, entry))
+
+
+def shortcut_ui_path(paths, entry):
+    """The executable owns the shortcut, independently of Steam's title/id spelling."""
+    actual = shortcut_path_value(shortcut_field(entry, "Exe", ""))
+    expected = shortcut_path_value(str(paths.data / "bin/deckcompanion-ui"))
+    directory = shortcut_path_value(shortcut_field(entry, "StartDir", ""))
+    return (actual.casefold() == expected.casefold() or
+            (actual.casefold() in ("deckcompanion-ui", "./deckcompanion-ui") and
+             directory.casefold() == shortcut_path_value(str(paths.data / "bin")).casefold()))
+
+
+def shortcut_path_value(value):
+    return os.path.normpath(str(value or "").strip().strip("\"'")).replace("\\", "/") if value else ""
+
+
+def shortcut_entries(path):
+    return list(vdf.binary_loads(path.read_bytes()).get("shortcuts", {}).values()) if path.exists() else []
+
+
+def shortcut_keep(paths, entries):
+    owned = [e for e in entries if shortcut_owned(paths, e)]
+    current = shortcut_identity(paths)[1]
+    return next((e for e in owned if shortcut_value("appid", shortcut_field(e, "appid")) == current),
+                owned[0] if owned else None)
+
+
+def shortcut_obsolete(paths, entries):
+    current = shortcut_identity(paths)[1]
+    # Never remove another shortcut's mapping/artwork if a foreign entry shares an id.
+    foreign = {shortcut_value("appid", shortcut_field(e, "appid")) for e in entries if not shortcut_owned(paths, e)}
+    return sorted({ident for e in entries if shortcut_owned(paths, e)
+                   and (ident := shortcut_value("appid", shortcut_field(e, "appid"))) not in (None, current)
+                   and ident not in foreign})
+
+
+def user_shortcuts(paths, path=None):
+    """Read shortcuts without mutating Steam or registering native programs as umu games."""
+    if path is None:
+        try:
+            path = shortcut_path(paths)
+        except Error as exc:
+            if exc.code != "steam_user_required":
+                raise
+            return {}
+    result = {}
+    for entry in shortcut_entries(path):
+        ident = shortcut_value("appid", shortcut_field(entry, "appid"))
+        if not ident or shortcut_owned(paths, entry):
+            continue
+        ident = str(ident)
+        played = shortcut_field(entry, "LastPlayTime")
+        result[ident] = {"appid": ident, "kind": "steam_shortcut",
+                         "name": shortcut_field(entry, "AppName", ident),
+                         "exe": shortcut_path_value(shortcut_field(entry, "Exe", "")),
+                         "start_dir": shortcut_path_value(shortcut_field(entry, "StartDir", "")),
+                         "last_played": int(played) if str(played).isdigit() and int(played) > 0 else None}
+    return result
+
+
+def ui_shortcut_ids(paths):
+    result = {str(shortcut_identity(paths)[1])}
+    try:
+        result.update(str(shortcut_value("appid", shortcut_field(e, "appid")))
+                      for e in shortcut_entries(shortcut_path(paths)) if shortcut_owned(paths, e))
+    except Error as exc:
+        if exc.code != "steam_user_required":
+            raise
+    return result
+
+
+def user_shortcut_artwork(paths, ident):
+    grid = shortcut_path(paths).parent / "grid"
+    return {("header" if name == "wide" else name): next(
+        (str(p.resolve()) for ext in ("png", "jpg", "jpeg")
+         if (p := grid / f"{ident}{suffix}.{ext}").is_file()), None)
+        for name, suffix in ARTWORK.items()}
 
 
 def shortcut_desired(paths):
@@ -356,23 +432,27 @@ def shortcut_matches(paths, key, actual, expected):
 
 
 def shortcut_reasons(paths, path):
-    doc = vdf.binary_loads(path.read_bytes()) if path.exists() else {"shortcuts": {}}
-    previous = next((e for e in doc.get("shortcuts", {}).values() if shortcut_owned(paths, e)), None)
+    entries = shortcut_entries(path)
+    previous = shortcut_keep(paths, entries)
     if previous is None:
         return [{"scope": "shortcut", "field": "entry", "before": None, "after": "DeckCompanion"}]
-    return [{"scope": "shortcut", "field": key, "before": shortcut_field(previous, key), "after": value}
+    result = [{"scope": "shortcut", "field": key, "before": shortcut_field(previous, key), "after": value}
             for key, value in shortcut_desired(paths).items()
             if not shortcut_matches(paths, key, shortcut_field(previous, key), value)]
+    count = sum(shortcut_owned(paths, e) for e in entries)
+    if count > 1:
+        result.append({"scope": "shortcut", "field": "duplicates", "before": count, "after": 1})
+    return result
 
 
 def shortcut_bytes(paths, path, remove=False):
     doc = vdf.binary_loads(path.read_bytes()) if path.exists() else {"shortcuts": {}}
     entries = list(doc.setdefault("shortcuts", {}).values())
     owned = lambda e: shortcut_owned(paths, e)
-    previous = next((e for e in entries if owned(e)), None)
+    previous = shortcut_keep(paths, entries)
     if not remove:
         desired = shortcut_desired(paths)
-        if previous and all(shortcut_matches(paths, k, shortcut_field(previous, k), value)
+        if previous and sum(owned(e) for e in entries) == 1 and all(shortcut_matches(paths, k, shortcut_field(previous, k), value)
                             for k, value in desired.items()):
             return path.read_bytes()  # Steam-added fields, order and player tags stay intact.
         updated = dict(previous if previous is not None else {
@@ -385,7 +465,8 @@ def shortcut_bytes(paths, path, remove=False):
                 updated.pop(spelling)
             updated[spellings[0] if spellings else key] = value
         desired = updated
-        entries = [desired if owned(e) else e for e in entries] if previous else [*entries, desired]
+        # Replace the kept record once, remove every other path-identity match.
+        entries = [desired if e is previous else e for e in entries if not owned(e) or e is previous] if previous else [*entries, desired]
     else:
         entries = [e for e in entries if not owned(e)]
     doc["shortcuts"] = {str(i): item for i, item in enumerate(entries)}
@@ -441,10 +522,29 @@ def prune_shortcut(paths, data):
     if data.get("shortcut_pending"):
         try:
             path = shortcut_path(paths)
-            data["shortcut_pending"] = bool(shortcut_reasons(paths, path) or artwork_reasons(paths, path))
+            entries = shortcut_entries(path)
+            foreign = {str(shortcut_value("appid", shortcut_field(e, "appid")))
+                       for e in entries if not shortcut_owned(paths, e)}
+            obsolete = (set(data.get("shortcut_cleanup", [])) |
+                        set(map(str, shortcut_obsolete(paths, entries)))) - foreign - {str(shortcut_identity(paths)[1])}
+            if obsolete or "shortcut_cleanup" in data:
+                # Persist removal intent before shutdown: a retry may find the shortcut
+                # gone while Steam has restored only its old mapping or artwork.
+                data["shortcut_cleanup"] = sorted(obsolete, key=int)
+            data["shortcut_pending"] = bool(shortcut_reasons(paths, path) or artwork_reasons(paths, path)
+                                            or shortcut_cleanup_reasons(paths, path, data))
+            if not data["shortcut_pending"]:
+                data.pop("shortcut_cleanup", None)
         except Error as exc:
             if exc.code != "steam_user_required":
                 raise  # Leave the queue for apply to resolve an account choice.
+
+
+def shortcut_cleanup_reasons(paths, path, data):
+    target = mappings(read_vdf(mapping_path(paths)))
+    return [{"scope": "shortcut", "appid": ident, "field": "obsolete", "before": ident, "after": None}
+            for ident in data.get("shortcut_cleanup", []) if ident in target or
+            any((path.parent / "grid" / f"{ident}{suffix}.png").exists() for suffix in ARTWORK.values())]
 
 
 def artwork_reasons(paths, path):
@@ -489,6 +589,7 @@ def steam_change_reasons(paths, data):
             path = shortcut_path(paths)
             result.extend(shortcut_reasons(paths, path))
             result.extend(artwork_reasons(paths, path))
+            result.extend(shortcut_cleanup_reasons(paths, path, data))
         except Error as exc:
             if exc.code != "steam_user_required":
                 raise
@@ -543,7 +644,7 @@ def prepare_apply(paths):
     reasons = steam_change_reasons(paths, data)
     doc = read_vdf(mapping_path(paths))
     target = mappings(doc)
-    changes, cleanup = [], []
+    changes, cleanup, deletes = [], [], []
     pending = data.get("default_pending")
     if pending:
         if pending == "default_on":
@@ -595,14 +696,22 @@ def prepare_apply(paths):
         changes.append(change)
     data["restore_pending"] = []
     writes = []
-    if changes:
-        writes.append((mapping_path(paths), vdf.dumps(doc, pretty=True).encode()))
     if data.get("shortcut_pending"):
         path = shortcut_path(paths)
+        for ident in data.get("shortcut_cleanup", []):
+            target.pop(ident, None)
+            if ident in data["games"]:
+                data["games"][ident].update(ui_shortcut=True, enabled=False, pending=None,
+                    takeover_managed=False, takeover_snapshot=False)
+            deletes.extend(path.parent / "grid" / f"{ident}{suffix}.png" for suffix in ARTWORK.values())
+            changes.append({"appid": ident, "action": "remove_shortcut"})
+        data.pop("shortcut_cleanup", None)
         writes.append((path, shortcut_bytes(paths, path)))
         writes.extend(shortcut_artwork(paths, path))
         data["shortcut_pending"] = False
         changes.append({"action": "shortcut"})
+    if changes:
+        writes.append((mapping_path(paths), vdf.dumps(doc, pretty=True).encode()))
     pending_games = [g for g in data.get("non_steam", {}).values() if g.get("pending")]
     if pending_games:
         from .nonsteam import shortcut_bytes as game_shortcut_bytes, shortcut_artwork as game_shortcut_artwork
@@ -618,7 +727,9 @@ def prepare_apply(paths):
     writes = [(p, payload) for p, payload in writes if differs(p, payload)]
     originals = {p: p.read_bytes() if p.exists() else None for p, _ in writes}
     originals.update({p: p.read_bytes() for p in cleanup if p.exists()})
+    originals.update({p: p.read_bytes() if p.exists() else None for p in deletes})
     return {"writes": writes, "originals": originals, "cleanup": cleanup, "data": data,
+            "deletes": deletes,
             "changes": changes, "steam_change_reasons": reasons,
             "mappings": {str(c.get("appid", "0")): target.get(str(c.get("appid", "0")))
                 for c in changes if c["action"] != "shortcut"},
@@ -667,6 +778,10 @@ def commit_apply(paths, plan, closed_window=False):
                 if not closed_window: require_closed()
                 path.unlink()
                 written.append(path)
+        for path in plan.get("deletes", []):
+            if not closed_window: require_closed()
+            path.unlink(missing_ok=True)
+            written.append(path)
         if not closed_window:
             save_state(paths, plan["data"])
     except Exception:
@@ -682,6 +797,8 @@ def commit_apply(paths, plan, closed_window=False):
 def verify_apply(paths, plan):
     """Steam may reserialize its files after starting; compare our managed values only."""
     target = mappings(read_vdf(mapping_path(paths)))
+    if any(p.exists() for p in plan.get("deletes", [])):
+        return False
     restored = {c.get("appid", "0") for c in plan["changes"] if c["action"] in ("restore", "restore_default")}
     for ident, expected in plan["mappings"].items():
         actual = target.get(ident)

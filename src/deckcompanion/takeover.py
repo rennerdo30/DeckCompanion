@@ -2,9 +2,8 @@
 import re
 from copy import deepcopy
 from pathlib import Path
-import vdf
 from . import appinfo, steam
-from .common import now
+from .common import now, state
 
 
 TOOL_IDS = {"228980", "1070560", "1391110", "1628350", "4183110", "1493710", "2180100", "4628710", "891390", "1007"}
@@ -52,20 +51,13 @@ def discover(paths):
     entries = {i: e for i, e in entries.items() if is_game(i, metadata, e)}
     target = steam.mappings(steam.read_vdf(steam.mapping_path(paths)))
     eligible = {ident for ident, entry in entries.items() if windows(entry, metadata, target.get(ident))}
-    # Mapping is machine-wide; inspect every account's Windows shortcuts, not native wrappers.
+    entries.update(steam.user_shortcuts(paths))
+    registered = {g["appid"] for g in state(paths).get("non_steam", {}).values()}
+    # Mapping is machine-wide; retain discovery across accounts, but list only the active one.
     for path in sorted((paths.steam / "userdata").glob("*/config/shortcuts.vdf")):
-        doc = vdf.binary_loads(path.read_bytes())
-        for value in doc.get("shortcuts", {}).values():
-            exe = value.get("Exe", "").strip().strip('"')
-            raw = value.get("appid")
-            if not exe.lower().endswith(".exe") or raw is None:
-                continue
-            ident = str(int(raw) & 0xffffffff)
-            if ident == "0":
-                continue
-            entries.setdefault(ident, {"appid": ident, "name": value.get("AppName", ident),
-                                       "path": exe, "kind": "shortcut"})
-            eligible.add(ident)
+        for ident, entry in steam.user_shortcuts(paths, path).items():
+            if ident not in registered and entry["exe"].lower().endswith(".exe"):
+                eligible.add(ident)
     return entries, eligible
 
 
@@ -118,7 +110,8 @@ def restore_all(paths, data):
     data["default_pending"] = None
     snapshot = data.get("takeover_snapshot", {})
     data["restore_pending"] = [i for i, value in snapshot.get("entries", {}).items()
-                               if (i != "0" or snapshot.get("default_managed")) and target.get(i) != value]
+                               if not data["games"].get(i, {}).get("ui_shortcut")
+                               and (i != "0" or snapshot.get("default_managed")) and target.get(i) != value]
     for ident in snapshot.get("entries", {}):
         if ident != "0":
             saved = data["games"].setdefault(ident, {})

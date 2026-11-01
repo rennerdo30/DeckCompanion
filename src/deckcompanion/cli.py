@@ -20,9 +20,21 @@ def game(paths, ident, discovery=None, metadata=None, available=None):
     entry = discovery[0].get(ident)
     recipe = recipes.load(paths, ident)
     saved = state(paths)["games"].get(ident, {})
+    shortcut = entry is not None and entry.get("kind") == "steam_shortcut"
+    windows = shortcut and entry["exe"].lower().endswith(".exe")
+    mapping = steam.mappings(steam.read_vdf(steam.mapping_path(paths))).get(ident)
+    proton_option = not shortcut or windows or bool((mapping or {}).get("name"))
     prefix, game_root = steam.content_roots(paths, ident)
     manifest = read_json(paths.data / "manifests" / f"{ident}.json", {"mods": {}})
     selected, reason, valve = selection(paths, ident, recipe or {}, saved, available, metadata)
+    if not proton_option:
+        selected, valve = None, None
+    takeover_fields = takeover.fields(state(paths), ident, discovery[1])
+    if shortcut and not windows:
+        takeover_fields["takeover"] = "n/a"
+    if shortcut and "previous_mapping" not in saved:
+        previous = state(paths).get("takeover_snapshot", {}).get("entries", {}).get(ident, mapping)
+        takeover_fields["previous_mapping"] = previous.get("name") if isinstance(previous, dict) else None
     mods = []
     for mod in (recipe or {}).get("mods", []):
         enabled = saved.get("mods", {}).get(mod["id"], mod.get("enabled", True))
@@ -34,11 +46,13 @@ def game(paths, ident, discovery=None, metadata=None, available=None):
     return {"appid": ident, "name": (entry or recipe or {}).get("name", ident), "installed": entry is not None,
             "has_recipe": recipe is not None, "enabled": saved.get("enabled", False),
             "pending": saved.get("pending"), "recipe_version": recipe["version"] if recipe else None,
-            "mods": mods, "last_launch": saved.get("last_launch"), "art": steam.artwork(paths, ident),
-            "last_played": steam.last_played(paths).get(ident),
+            "mods": mods, "last_launch": saved.get("last_launch"),
+            "art": steam.user_shortcut_artwork(paths, ident) if shortcut else steam.artwork(paths, ident),
+            "last_played": entry["last_played"] if shortcut else steam.last_played(paths).get(ident),
+            **({"exe": entry["exe"], "start_dir": entry["start_dir"]} if shortcut else {}),
             **({"kind": entry["kind"]} if entry and "kind" in entry else {}),
-            **takeover.fields(state(paths), ident, discovery[1]), "valve_recommendation": valve,
-            "options": {"proton": True, "takeover": True},
+            **takeover_fields, "valve_recommendation": valve,
+            "options": {"proton": proton_option, "takeover": windows if shortcut else True},
             "proton": {"name": selected["name"], "reason": reason} if selected else None}
 
 
@@ -235,10 +249,16 @@ def execute(args, paths):
         identifiers = set(discovery[0]) | {i for i in recipes.ids(paths) if i.isdigit()} | set(data["games"])
         metadata, available = appinfo.load(paths), steam.proton(paths)
         installed = steam.installed(paths)
-        identifiers = {i for i in identifiers if takeover.is_game(i, metadata, installed.get(i))}
+        identifiers = {i for i in identifiers if discovery[0].get(i, {}).get("kind") == "steam_shortcut"
+                       or takeover.is_game(i, metadata, installed.get(i))}
         from . import nonsteam
         registered_ids = {g["appid"] for g in data.get("non_steam", {}).values()}
-        return {"games": [game(paths, ident, discovery, metadata, available) for ident in sorted(identifiers - registered_ids, key=int)] +
+        hidden = steam.ui_shortcut_ids(paths) | {i for i, g in data["games"].items() if g.get("ui_shortcut")}
+        # Machine-wide takeover may have saved state for another account's shortcut.
+        # Keep that state recoverable without displaying an unnamed inactive row.
+        for path in (paths.steam / "userdata").glob("*/config/shortcuts.vdf"):
+            hidden.update(set(steam.user_shortcuts(paths, path)) - set(discovery[0]))
+        return {"games": [game(paths, ident, discovery, metadata, available) for ident in sorted(identifiers - registered_ids - hidden, key=int)] +
                 [nonsteam.game(paths, saved) for saved in data.get("non_steam", {}).values() if not saved.get("removed")]}
     if name == "game":
         result = game(paths, args.appid)
@@ -319,6 +339,7 @@ def execute(args, paths):
         if data.get("default_pending"):
             pending.append({"action": data["default_pending"]})
         pending += takeover.restore_pending(data)
+        pending += [{"appid": ident, "action": "remove_shortcut"} for ident in data.get("shortcut_cleanup", [])]
         return {"version": __version__, "install_path": str(paths.data), "steam_running": steam.running(),
                 "shortcut_appid": shortcut(paths),
                 "channels": channels.snapshot(paths),
