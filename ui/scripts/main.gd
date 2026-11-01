@@ -73,6 +73,7 @@ var failed_args: Array = []
 var log_view: ScrollContainer
 var dialog: ConfirmationDialog
 var last_focus := ""
+var rendered_view := ""
 var modal_focus: Control
 var art_cache: Node
 var preview: VBoxContainer
@@ -907,6 +908,11 @@ func _completed(command: String, data: Dictionary) -> void:
 	_render()
 
 func _render() -> void:
+	# Redrawing the same screen keeps its scroll position (owner: "Check now" jumped
+	# down because focus was restored before the new layout existed).
+	var view := "%d:%s:%s" % [tab,str(detail),str(add_flow != null)]
+	var keep_scroll: int = screen_scroll.scroll_vertical if is_instance_valid(screen_scroll) and view == rendered_view else -1
+	rendered_view = view
 	screen_scroll = null
 	preview = null
 	preview_scroll = null
@@ -942,7 +948,7 @@ func _render() -> void:
 	hints.library_preview = is_instance_valid(preview)
 	hints.queue_redraw()
 	Nav.wire(controls)
-	_restore_focus.call_deferred()
+	_restore_focus_keeping_scroll.call_deferred(keep_scroll)
 	_wire_top_row.call_deferred()
 
 ## Corner status: a quiet checkmark when nothing waits, an Apply call to action otherwise.
@@ -982,6 +988,21 @@ func _wire_top_row() -> void:
 	for control in content:
 		if control.get_global_rect().position.y <= top_y + 12: control.focus_neighbor_top = control.get_path_to(tab_chip)
 	tab_chip.focus_neighbor_bottom = tab_chip.get_path_to(content.filter(func(c): return c.get_global_rect().position.y <= top_y + 12)[0])
+
+func _restore_focus_keeping_scroll(keep: int) -> void:
+	var scroll := screen_scroll
+	if keep < 0 or not is_instance_valid(scroll):
+		_restore_focus()
+		return
+	scroll.follow_focus = false
+	await get_tree().process_frame  # let the rebuilt screen lay out first
+	if not is_instance_valid(scroll): return
+	scroll.scroll_vertical = keep
+	_restore_focus()
+	await get_tree().process_frame
+	if not is_instance_valid(scroll): return
+	scroll.scroll_vertical = keep
+	scroll.follow_focus = true
 
 func _restore_focus() -> void:
 	if not controls.is_empty():

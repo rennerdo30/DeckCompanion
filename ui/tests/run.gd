@@ -379,6 +379,17 @@ func settings_checks(ui: Node) -> void:
 	ui._switch_tab(0)
 	check(control(ui,"480") != null,"library preference restores no-recipe games")
 	ui._switch_tab(2)
+	# Owner: "Check now" scrolled the page down. Redraws keep the scroll position.
+	await create_timer(0.3).timeout
+	if ui.update_backend.busy: await ui.update_backend.completed
+	ui.screen_scroll.scroll_vertical = 120
+	await create_timer(0.2).timeout
+	control(ui,"check").grab_focus()
+	await create_timer(0.2).timeout
+	var kept: int = ui.screen_scroll.scroll_vertical
+	control(ui,"check").pressed.emit()
+	await create_timer(1.0).timeout
+	check(ui.screen_scroll.scroll_vertical == kept,"Check now keeps the Settings scroll position (%d -> %d)" % [kept,ui.screen_scroll.scroll_vertical])
 	ui._show_license(false)
 	check(ui.licenses.visible and ui.licenses.get_child(0) is ScrollContainer,"MIT opens scrollable license dialog")
 	ui.licenses.hide()
