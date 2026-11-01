@@ -8,7 +8,7 @@ var default_tool := false
 var default_pending = null
 var worker: Thread
 var active := ""
-var settings := {"splash":true,"splash_seconds":2.5,"show_games_without_recipe":true,"check_updates_on_start":true}
+var settings := {"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true}
 
 func _ready() -> void:
 	mock = "--mock" in OS.get_cmdline_user_args() or OS.get_environment("DECKCOMPANION_UI_MOCK") == "1"
@@ -41,7 +41,7 @@ static func parse_response(raw: String, exit_code: int, command: String) -> Dict
 	if exit_code != 0: return failure("COMMAND_FAILED", "The engine exited with code %s. Refresh before trying again." % exit_code)
 	var valid := true
 	match command:
-		"settings": valid = data.get("splash") is bool and (data.get("splash_seconds") is float or data.get("splash_seconds") is int) and data.splash_seconds >= 1 and data.splash_seconds <= 6 and data.get("show_games_without_recipe") is bool and data.get("check_updates_on_start") is bool
+		"settings": valid = data.get("splash") is bool and (data.get("splash_seconds") is float or data.get("splash_seconds") is int) and data.splash_seconds >= 1 and data.splash_seconds <= 10 and data.get("show_games_without_recipe") is bool and data.get("check_updates_on_start") is bool
 		"games":
 			valid = data.get("games") is Array
 			if valid:
@@ -129,11 +129,11 @@ func mock_response(command: String, args: Array = []) -> Dictionary:
 	if command == "settings":
 		for i in args.size():
 			if args[i] == "--splash": settings.splash = args[i+1] == "on"
-			if args[i] == "--splash-seconds": settings.splash_seconds = clampf(float(args[i+1]),1,6)
+			if args[i] == "--splash-seconds": settings.splash_seconds = clampf(float(args[i+1]),1,10)
 			if args[i] == "--set":
 				var pair: PackedStringArray = str(args[i+1]).split("=",true,1)
 				if pair.size() != 2 or not settings.has(pair[0]): return failure("invalid_arguments","Unknown setting")
-				if pair[0] == "splash_seconds": settings[pair[0]] = clampf(float(pair[1]),1,6)
+				if pair[0] == "splash_seconds": settings[pair[0]] = clampf(float(pair[1]),1,10)
 				elif pair[1] in ["true","false","on","off"]: settings[pair[0]] = pair[1] in ["true","on"]
 				else: return failure("invalid_arguments","Expected a boolean")
 		return settings.duplicate()

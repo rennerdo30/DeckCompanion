@@ -78,7 +78,7 @@ def execute(args, paths):
     name = args.command
     data = state(paths)
     if name == "settings":
-        from .splash import DEFAULTS, settings
+        from .splash import DEFAULTS, MAX_SECONDS, settings
         options = settings(data)
         for setting in args.set:
             key, separator, value = setting.partition("=")
@@ -91,7 +91,7 @@ def execute(args, paths):
                     raise Error("invalid_arguments", "Splash duration must be a finite number") from exc
                 if not math.isfinite(number):
                     raise Error("invalid_arguments", "Splash duration must be a finite number")
-                options[key] = max(1.0, min(6.0, number))
+                options[key] = max(1.0, min(MAX_SECONDS, number))
             else:
                 if value.lower() not in ("true", "false", "on", "off"):
                     raise Error("invalid_arguments", "Boolean settings accept true/false or on/off")
@@ -101,7 +101,7 @@ def execute(args, paths):
         if args.splash_seconds is not None:
             if not math.isfinite(args.splash_seconds):
                 raise Error("invalid_arguments", "Splash duration must be a finite number")
-            options["splash_seconds"] = max(1.0, min(6.0, args.splash_seconds))
+            options["splash_seconds"] = max(1.0, min(MAX_SECONDS, args.splash_seconds))
         if args.splash is not None or args.splash_seconds is not None or args.set:
             data.setdefault("settings", {}).update(options)
             save_state(paths, data)

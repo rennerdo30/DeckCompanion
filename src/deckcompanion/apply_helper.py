@@ -1,11 +1,12 @@
 """Linux apply worker, independent of the Steam/UI process tree. Stdlib only."""
 import os
+from contextlib import contextmanager
 from pathlib import Path
 import shutil
 import sys
 import time
 from . import steam
-from .common import Error, locked, now, write_json
+from .common import Error, locked, now, save_state, write_json
 
 
 def gamescope_running():
@@ -92,7 +93,7 @@ def schedule(paths):
     return {"applied": [], "scheduled": True, "steam_restarted": False, "helper": unit}
 
 
-def wait_until(predicate, seconds):
+def wait_until(predicate, seconds, interval=0.25):
     deadline = time.monotonic() + seconds
     while True:
         if predicate():
@@ -100,7 +101,7 @@ def wait_until(predicate, seconds):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return False
-        time.sleep(min(0.25, remaining))
+        time.sleep(min(interval, remaining))
 
 
 def restore(mode):
@@ -130,8 +131,9 @@ def restore(mode):
         raise Error("steam_start_failed", "Steam/session did not return within 10 seconds")
 
 
-def apply_pending(paths):
-    # Queue commands can briefly hold the state lock; retry only lock acquisition.
+@contextmanager
+def pending_plan(paths):
+    # Acquire and serialize before Steam exits, never inside its short respawn window.
     deadline = time.monotonic() + 10
     while True:
         with_lock = locked(paths)
@@ -143,7 +145,8 @@ def apply_pending(paths):
             time.sleep(0.25)
             continue
         try:
-            return steam.apply(paths)
+            yield steam.prepare_apply(paths)
+            return
         finally:
             with_lock.__exit__(None, None, None)
 
@@ -158,27 +161,63 @@ def apply_helper(paths, was_game_mode=False):
         write_json(log, result)
         shutdown = False
         closed = False
+        restored = False
+        restore_started = False
+        prepared = []
         try:
             result["game_mode"] = was_game_mode or game_mode()
             phase = time.monotonic()
-            if steam.running():
-                shutdown = True
-                # steam -shutdown itself can take ~40 s on SteamOS.
-                steam.run(["steam", "-shutdown"], timeout=120)
-            closed = wait_until(lambda: not steam.running(), max(0, 120 - (time.monotonic() - phase)))
-            result["timings"]["shutdown"] = time.monotonic() - phase
-            if not closed:
-                raise Error("steam_shutdown_timeout", "Steam did not exit within 120 seconds; nothing written")
-            phase = time.monotonic()
-            result["applied"] = apply_pending(paths)["applied"]
-            result["timings"]["apply"] = time.monotonic() - phase
+            with pending_plan(paths) as initial:
+                result["timings"]["prepare"] = time.monotonic() - phase
+                result.update(attempts=0, verified=False)
+                for attempt in range(2):
+                    result["attempts"] = attempt + 1
+                    # Refresh Steam's unrelated fields after a failed verification, retaining
+                    # the original previous-mapping restoration metadata until acceptance.
+                    plan = initial if attempt == 0 else steam.prepare_apply(paths)
+                    plan["data"] = initial["data"]
+                    prepared.append(plan)
+                    steam.backup_apply(plan)
+                    closed = restored = restore_started = False
+                    phase = time.monotonic()
+                    if steam.running():
+                        shutdown = True
+                        # Includes the blocking launcher in the per-cycle 120 second budget.
+                        steam.run(["steam", "-shutdown"], timeout=120)
+                    closed = wait_until(lambda: not steam.running(),
+                        max(0, 120 - (time.monotonic() - phase)), interval=0.05)
+                    result["timings"]["shutdown"] = time.monotonic() - phase
+                    if not closed:
+                        if attempt == 0: continue
+                        raise Error("steam_shutdown_timeout",
+                            "Missed Steam's closed window in two shutdown cycles; queued changes retained")
+                    phase = time.monotonic()
+                    steam.commit_apply(paths, plan, closed_window=True)
+                    result["applied"] = plan["changes"]
+                    result["timings"]["apply"] = time.monotonic() - phase
+                    phase = time.monotonic()
+                    restore_started = True
+                    restore(result["game_mode"])
+                    restored = True
+                    result["steam_restarted"] = True
+                    result["timings"]["restore"] = time.monotonic() - phase
+                    if steam.verify_apply(paths, plan):
+                        save_state(paths, plan["data"])
+                        result["verified"] = True
+                        break
+                    result["applied"] = []
+                    if attempt == 1:
+                        raise Error("steam_apply_verification_failed",
+                            "Steam overwrote queued changes after two shutdown/write cycles; queue retained")
         except Exception as exc:
             result["errors"].append({"code": getattr(exc, "code", "operation_failed"), "message": str(exc)})
         finally:
+            for plan in prepared:
+                steam.discard_prepared(plan)
             # Restore after a failed disk write as well, but never switch sessions
             # if Steam never closed. Persist disk results before session switching.
             write_json(log, result)
-            should_restore = closed
+            should_restore = closed and not restore_started
             if shutdown and not closed:
                 try:
                     should_restore = not steam.running()

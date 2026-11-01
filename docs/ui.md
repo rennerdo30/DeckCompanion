@@ -38,13 +38,19 @@ Launch mode: `deckcompanion-ui --splash <UTF-8 JSON file>` routes through
 uses only the supplied launch summary and local artwork; no engine CLI or network
 calls. The first frame uses generated artwork; the existing image worker decodes
 hero/header/portrait while the logo loads through Godot's threaded resource loader.
-A/B on any device, Enter/Escape, touch or left click skips; duration completion and
-skip both exit 0. Bad/missing JSON exits 1 so the engine can log and continue.
+A/B on any device or Enter/Escape skips; visible **A Skip** and **Y Hold** buttons
+accept touch/mouse clicks. Hold freezes the countdown and progress, labels the bar
+**Paused**, and offers **A Continue** to start immediately. B also continues.
+After 120 seconds held, the splash exits automatically. The engine independently
+bounds its wait to duration + 122 seconds, capped at 130. Normal completion and
+skip exit 0. Bad/missing JSON exits 1 so the engine can log and continue.
 
-**Settings → General → Launch splash** saves on/off and a 1–6 second duration
+**Settings → General → Launch splash** saves on/off and a 1–10 second duration
 through `settings`. Focusable 0.5-second decrement/increment buttons work with the
 normal controller navigation, and the card scrolls into view. Preferences save
-immediately, without Apply/restart. The mock backend retains them for its session.
+immediately, without Apply/restart. The default is **4 seconds**. Each setting's
+description sits below its title, with a compact On/Off switch beside it; the
+duration label and stepper share a row. The mock backend retains them for its session.
 
 Settings is the third tab. General also contains the global default-tool control,
 which still queues a change for Apply. Library can hide games without a recipe.
@@ -61,6 +67,7 @@ button cancellation and light inertia. Taps keep their normal button action.
 Nested scroll areas own their gesture exclusively; keyboard/controller input stops
 inertia, while focus-follow and right-stick scrolling retain their usual behavior.
 Splash details use the same helper; a tap skips and a swipe scrolls the summary.
+While held, use Continue or B to leave; tapping the summary keeps it paused.
 
 Splash fixture capture (run offscreen with the window positioned outside the desktop):
 
@@ -75,6 +82,13 @@ also exercises the real boot route with `-- --splash res://fixtures/splash.json`
 lets it exit automatically. The new tests fail against archived `c88008b` (four UI
 failures for DC-18); existing UI checks remain green. The screenshot is mock artwork, not a
 Steam Deck capture. **Not verified on hardware:** splash focus, stacking and timing.
+
+For repeatable Settings, scrolled About, normal splash and held splash PNGs, run
+`--script res://tests/capture_polish.gd -- --mock --polish-capture-dir=<absolute-directory>`
+with the offscreen/windowed flags above. Repeat at `--resolution 1920x1080`; the
+script renders at native pixels and adds the `-1920x1080` suffix. These captures
+use the existing original fixture art. `layout_polish.gd` checks both viewport
+bounds and long content; `splash_hold.gd` checks pause, Continue, B and the safety cap.
 
 - `main.tscn` / `scripts/main.gd`: responsive containers, library/detail/status screens, loading/error/empty states, restart confirmation and input hints. Base layout 1280×800; canvas scaling supports desktop windows and 1920×1080.
 - `scripts/backend.gd`: one command at a time, signal completion, JSON/shape validation and a stateful fixture backend. Production `OS.execute` runs on a worker `Thread`, never the UI thread. Linux uses `/usr/bin/timeout` with 45 seconds plus a 3-second kill grace; Windows uses the bundled process runner with a 45-second timeout. A timed-out mutation prompts a refresh rather than claiming success. Exit joins the bounded worker.

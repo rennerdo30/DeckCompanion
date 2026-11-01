@@ -43,16 +43,16 @@ contract too. `--help` is the human help exception. No progress messages on stdo
   or `{"action":"default_off"}` without an appid for a queued global change.
   `last_apply` is null before a helper run, then the content of `logs/apply-last.json`.
 
-- `settings --json` -> `{"splash":true,"splash_seconds":2.5,"show_games_without_recipe":true,"check_updates_on_start":true}`.
+- `settings --json` -> `{"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true}`.
   Returns all persisted settings plus defaults; reading does not write the state file.
   `settings --set key=value [--set key=value ...] --json` validates all entries before
   saving. Boolean keys `splash`, `show_games_without_recipe` and
   `check_updates_on_start` accept true/false or on/off; all default on. Numeric
-  `splash_seconds` defaults to 2.5 and clamps finite numbers to 1–6. Unknown keys,
+  `splash_seconds` defaults to 4 and clamps finite numbers to 1–10. Unknown keys,
   malformed entries, invalid booleans and nonfinite numbers fail without partial writes.
   `settings --splash on|off --splash-seconds N --json` updates either or both values
   under `settings` in state, preserving other settings and game data. Defaults are
-  on and 2.5 seconds; finite durations clamp to 1–6 seconds. Changes take effect on
+  on and 4 seconds; finite durations clamp to 1–10 seconds. Changes take effect on
   the next game launch and need no Steam restart. Nonfinite values are rejected.
   Splash flags are aliases and take precedence over `--set` for the same key.
   Library visibility and automatic update checks are UI preferences; the UI runs
@@ -71,11 +71,15 @@ does not depend on the UI or SSH session lifetime; nohup is not used.
 
 The helper pins the invoking engine and forwards configured roots and Steam user ID.
 It holds `apply.lock` for its whole run, records its PID, detects Game Mode, sends
-`steam -shutdown`, and waits up to 120 seconds total (including the shutdown command)
-for both `steam` and `steamwebhelper` to disappear. It then takes the state lock,
-applies the queue with existing guards/backups, and restores Steam even after a disk
-write failure. A shutdown timeout writes no Steam files and retains the queue.
-The state lock is held only during writes, so status remains readable during shutdown.
+`steam -shutdown`, and polls every 50 ms for both `steam` and `steamwebhelper` to
+disappear, within 120 seconds per cycle including the shutdown command. Before
+shutdown it takes the state lock, serializes the queued transaction and stages
+backups. The closed interval only commits the transaction, without further process
+queries or lock waits. Disk failures roll back all written files, retaining the queue.
+After Steam returns it verifies mapping values, owned shortcut fields and artwork
+hashes. A missed window or overwritten values triggers one more shutdown/write cycle.
+After two failed cycles, `apply-last.json` reports a clear error and retains the queue.
+The state lock stays held until verification; read-only status remains available.
 
 Game Mode detection uses `/proc/*/comm` names `gamescope` or `start-gamescope-session`
 (including Linux's truncated `start-gamescope` name), `gamescope`/`steam` in
@@ -90,8 +94,9 @@ is intentionally long-lived.
 
 `~/.local/share/deckcompanion/logs/apply-last.json` (under `DECKCOMPANION_HOME` when
 overridden) records `pid`, `started_at`, `finished_at`, `game_mode`, `applied`,
-`steam_restarted`, `errors` (code/message objects), and `timings` (seconds for completed
-shutdown/apply/restore phases and total). An in-flight receipt has no `finished_at`;
+`steam_restarted`, `attempts`, `verified`, `errors` (code/message objects), and `timings`
+(seconds for prepare and the last shutdown/apply/restore phases and total).
+An in-flight receipt has no `finished_at`;
 an interrupted or service-timeout run can leave that receipt for diagnosis. A second
 helper fails with `busy` without touching the active receipt or Steam. The internal
 CLI exits 1 when the receipt contains errors. Not verified on hardware.
@@ -235,7 +240,13 @@ spawning and removed after the UI exits. Native ELF/script passthrough runs firs
 so the management UI's own Steam shortcut and other native programs never get a
 splash. Other Proton verbs do not show it. Off skips the subprocess entirely.
 
-The engine records its child PID, waits at most the configured duration + 2 seconds,
+The splash defaults to 4 seconds (1–10 in Settings). Its visible **A Skip** and
+**Y Hold** buttons also accept touch/mouse input; B skips. Hold pauses countdown
+and labels progress **Paused**. **A Continue** starts the game immediately; a held
+splash starts automatically after 120 seconds.
+
+The engine records its child PID, waits at most the duration + 120 + 2 seconds
+(capped at 130 seconds),
 then kills only that child if needed (up to 2 seconds to reap). Missing executables,
 no display, crashes, timeout, corrupt settings and payload errors are logged to the
 game's existing launch log; the same prepared Proton arguments/environment still

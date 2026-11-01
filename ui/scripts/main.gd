@@ -479,30 +479,35 @@ func _scroll_column() -> VBoxContainer:
 func _settings_screen() -> void:
 	var column := _scroll_column()
 	var splash_card := _card(column)
+	splash_card.add_theme_constant_override("separation",20)
 	splash_card.add_child(_label("General",23))
-	_paragraph(splash_card,"See your Proton build, fixes and mods before the game starts. A, B or touch skips it.")
 	var splash_enabled: bool = settings.get("splash",true)
-	_button("Launch splash: On" if splash_enabled else "Launch splash: Off",func(): _request("settings",["--splash","off" if splash_enabled else "on"]),splash_card,"splash_toggle",not settings.is_empty())
-	var duration_row := _row(splash_card)
-	var seconds: float = settings.get("splash_seconds",2.5)
-	_button("−  0.5 s",func(): _request("settings",["--splash-seconds",str(seconds-0.5)]),duration_row,"splash_less",seconds > 1 and not settings.is_empty())
-	duration_row.add_child(_label("%.1f seconds" % seconds,20,MINT))
-	_button("+  0.5 s",func(): _request("settings",["--splash-seconds",str(seconds+0.5)]),duration_row,"splash_more",seconds < 6 and not settings.is_empty())
-	var defaults := splash_card
-	defaults.add_child(_label("Default for all games",23))
+	var splash_row := _setting_row(splash_card,"Launch splash","See your Proton build, fixes and mods before launch. Skip with A or pause with Y.")
+	_state_switch(splash_row,"splash_toggle",splash_enabled,func(): _request("settings",["--splash","off" if splash_enabled else "on"]),not settings.is_empty())
+	var duration_row := _setting_row(splash_card,"Splash duration","Your game starts automatically after this time.")
+	var stepper := _row(duration_row)
+	stepper.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var seconds: float = settings.get("splash_seconds",4.0)
+	_button("−",func(): _request("settings",["--splash-seconds",str(seconds-0.5)]),stepper,"splash_less",seconds > 1 and not settings.is_empty()).tooltip_text = "Reduce by 0.5 seconds"
+	var duration_value := _label("%.1f s" % seconds,20,MINT)
+	duration_value.custom_minimum_size.x = 64
+	duration_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stepper.add_child(duration_value)
+	_button("+",func(): _request("settings",["--splash-seconds",str(seconds+0.5)]),stepper,"splash_more",seconds < 10 and not settings.is_empty()).tooltip_text = "Increase by 0.5 seconds"
 	var pending_actions: Array = status.get("pending",[]).map(func(p): return p.get("action",""))
 	var is_default: bool = status.get("default_tool",false)
 	if pending_actions.has("default_on"): is_default = true
 	elif pending_actions.has("default_off"): is_default = false
-	_paragraph(defaults,"Use DeckCompanion for Windows games without their own Steam compatibility setting; Apply restarts Steam.")
-	_button("Stop using as default" if is_default else "Use DeckCompanion for all games",func(): _request("default",["--off" if is_default else "--on"]),defaults,"default")
+	var defaults := _setting_row(splash_card,"Default for all games","Use for Windows games without their own compatibility setting. Apply restarts Steam.")
+	_state_switch(defaults,"default",is_default,func(): _request("default",["--off" if is_default else "--on"]))
 	var library := _card(column)
 	library.add_child(_label("Library",23))
 	_setting_toggle(library,"show_games_without_recipe","Show games without a recipe","Keep every installed game visible, including games with no DeckCompanion recipe.")
 	var updates := _card(column)
 	updates.add_child(_label("Updates",23))
 	_setting_toggle(updates,"check_updates_on_start","Check when DeckCompanion opens","Check the engine and recipe index in the background when the UI opens.")
-	_button("Checking…" if update_backend.busy else "Check now",_check_updates,updates,"check",not update_backend.busy)
+	var check_row := _setting_row(updates,"Check for updates","Look for a newer engine and recipe index now.")
+	_button("Checking…" if update_backend.busy else "Check now",_check_updates,check_row,"check",not update_backend.busy).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var about := _card(column)
 	about.add_child(_label("About",23))
 	_paragraph(about,"Engine %s  ·  UI %s\nInstall path: %s" % [status.get("version","Not connected"),UI_VERSION,status.get("install_path","Not reported by engine")])
@@ -515,9 +520,43 @@ func _settings_screen() -> void:
 	_button("Third-party notices",_show_license.bind(true),about,"notices")
 
 func _setting_toggle(parent: Node, key: String, title: String, explanation: String) -> void:
-	_paragraph(parent,explanation)
+	var row := _setting_row(parent,title,explanation)
 	var enabled: bool = settings.get(key,true)
-	_button(title + (": On" if enabled else ": Off"),func(): _request("settings",["--set",key+"="+str(not enabled).to_lower()]),parent,key,not settings.is_empty())
+	_state_switch(row,key,enabled,func(): _request("settings",["--set",key+"="+str(not enabled).to_lower()]),not settings.is_empty())
+
+func _setting_row(parent: Node, title: String, explanation: String) -> HBoxContainer:
+	var row := _row(parent)
+	row.add_theme_constant_override("separation",32)
+	var info := VBoxContainer.new()
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	info.add_theme_constant_override("separation",4)
+	row.add_child(info)
+	var heading := _label(title,20)
+	heading.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info.add_child(heading)
+	var description := _label(explanation,17,MUTED)
+	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info.add_child(description)
+	return row
+
+func _state_switch(parent: Node, id: String, enabled: bool, action: Callable, available := true) -> CheckButton:
+	var button := CheckButton.new()
+	button.text = "On" if enabled else "Off"
+	button.button_pressed = enabled
+	button.custom_minimum_size = Vector2(132,52)
+	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	button.disabled = not available or backend.busy
+	button.set_meta("focus_id",id)
+	button.tooltip_text = parent.get_child(0).get_child(0).text + (": On" if enabled else ": Off")
+	for state in ["normal","hover","pressed","hover_pressed","disabled"]:
+		button.add_theme_stylebox_override(state,_style(Color("294436") if enabled else Color("1c303c")))
+	button.add_theme_stylebox_override("focus",_style(Color(0.65,0.94,0.55,0.08),MINT))
+	button.add_theme_color_override("font_color",MINT if enabled else MUTED)
+	button.pressed.connect(action)
+	button.focus_entered.connect(func(): last_focus = id)
+	parent.add_child(button)
+	if not button.disabled: controls.append(button)
+	return button
 
 func _check_updates() -> void:
 	if not update_backend.busy: update_backend.request("update")
