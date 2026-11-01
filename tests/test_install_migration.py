@@ -188,7 +188,7 @@ def test_symlink_rejection_is_actionable_in_game_json(paths, tmp_path, monkeypat
     launch.prepare(paths, "run", ["game.exe"], {"SteamAppId": "2300320", "STEAM_COMPAT_DATA_PATH": str(prefix)})
     assert cli.main(["game", "2300320", "--json"]) == 0
     result = json.loads(capsys.readouterr().out)
-    for text in (result["notes"], result["log_tail"]):
+    for text in (result["notes"], "\n".join(result["log_tail"])):
         assert "fs25-deck-mode" in text
         assert recipe["mods"][0]["target"] in text
         assert str(outside) in text and "symlink redirects outside the root are not allowed" in text

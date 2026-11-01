@@ -120,8 +120,8 @@ def test_cli_shapes_and_errors(paths, monkeypatch, capsys):
     assert invoke(capsys, "mod", "2300320", "missing", "--on")[0] == 1
     atomic(paths.data / "logs/2300320-last.log", "".join(f"{n}\n" for n in range(230)))
     detail = invoke(capsys, "game", "2300320")[1]
-    assert len(detail["log_tail"].splitlines()) == 200
-    assert detail["log_tail"].startswith("30\n")
+    assert isinstance(detail["log_tail"], list) and len(detail["log_tail"]) == 200
+    assert detail["log_tail"][0] == "30"
     assert "notes" in detail
     assert set(invoke(capsys, "status")[1]) == {"version", "steam_running", "pending", "proton"}
     code, error = invoke(capsys, "enable", "../bad")

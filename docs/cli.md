@@ -16,7 +16,7 @@ contract too. `--help` is the human help exception. No progress messages on stdo
 
 - `games --json` -> `{"games":[GAME,...]}`. Includes installed games, bundled/cached
   recipes, and games with saved state. IDs are strings. No network requests.
-- `game APPID --json` -> GAME plus `notes` (string) and `log_tail` (string, last 200 lines).
+- `game APPID --json` -> GAME plus `notes` (string) and `log_tail` (array of strings, last 200 lines, newlines stripped).
 - `enable APPID --json` / `disable APPID --json` -> GAME. Queues a change; does not write Steam files.
 - `mod APPID MOD_ID --on|--off --json` -> GAME. Saves preference immediately; content reconciles at launch.
 - `apply [--restart-steam] --json` -> `{"applied":[{"appid":"2300320","action":"enable"}],"steam_restarted":true}`.

@@ -78,9 +78,9 @@ def execute(args, paths):
         path = paths.data / "logs" / f"{args.appid}-last.log"
         if path.exists():
             with path.open(encoding="utf-8", errors="replace") as log:
-                result["log_tail"] = "".join(deque(log, maxlen=200))
+                result["log_tail"] = [line.rstrip("\r\n") for line in deque(log, maxlen=200)]
         else:
-            result["log_tail"] = ""
+            result["log_tail"] = []
         return result
     if name in ("enable", "disable", "mod"):
         saved = data["games"].setdefault(args.appid, {})
