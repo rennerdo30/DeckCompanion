@@ -1,6 +1,24 @@
+<p align="center">
+  <a href="https://deckcompanion.renner.dev"><img src="assets/steam/wide.png" alt="DeckCompanion" width="620"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/rennerdo30/DeckCompanion/releases/latest"><img src="https://img.shields.io/github/v/release/rennerdo30/DeckCompanion?color=b7e07a&label=release" alt="Latest release"></a>
+  <a href="https://github.com/rennerdo30/DeckCompanion/actions/workflows/ci.yml"><img src="https://github.com/rennerdo30/DeckCompanion/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/rennerdo30/DeckCompanion?color=e8d39a" alt="MIT license"></a>
+  <a href="https://deckcompanion.renner.dev"><img src="https://img.shields.io/badge/website-deckcompanion.renner.dev-5fb3a1" alt="Website"></a>
+</p>
+
 # DeckCompanion
 
 **Fixes, mods and the right Proton for every Steam Deck game.** Website: <https://deckcompanion.renner.dev>
+
+<p align="center">
+  <img src="website/assets/shots/library.png" alt="Library with game artwork, filters and a live preview" width="32%">
+  <img src="website/assets/shots/detail.png" alt="Game page with Proton choice, fixes and mods" width="32%">
+  <img src="website/assets/shots/splash.png" alt="Launch splash showing Proton, fixes and mods" width="32%">
+</p>
+<p align="center"><sub>Real screenshots from a Steam Deck: library, game page (Farming Simulator 25 with Deck Mode) and the launch splash.</sub></p>
 
 DeckCompanion is a Steam compatibility tool plus a controller-first app in your Steam library:
 - **Proton per game:** picks the right build for each game (recipe pin, your choice, GE-Proton when a community fix exists, Valve's recommendation).
