@@ -84,7 +84,7 @@ def test_deck_library_lists_every_user_shortcut_and_hides_our_numeric_game(paths
         "art": {name: str((deck[0].parent / "grid" / f"3135360851{suffix}.png").resolve())
                 for name, suffix in (("portrait", "p"), ("header", ""), ("hero", "_hero"), ("logo", "_logo"), ("icon", "_icon"))},
         "takeover": "on", "previous_mapping": "Proton-GE Latest", "valve_recommendation": None,
-        "options": {"proton": True, "takeover": True},
+        "options": {"proton": True, "takeover": True}, "community_fix": None, "community_fix_source": None,
         "proton": {"name": "GE-Proton11-7", "reason": "newest"}}
     assert invoke(paths, "game", "3135360851") == dict(windows, notes="", log_tail=[])
 

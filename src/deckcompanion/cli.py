@@ -26,9 +26,11 @@ def game(paths, ident, discovery=None, metadata=None, available=None):
     proton_option = not shortcut or windows or bool((mapping or {}).get("name"))
     prefix, game_root = steam.content_roots(paths, ident)
     manifest = read_json(paths.data / "manifests" / f"{ident}.json", {"mods": {}})
-    selected, reason, valve = selection(paths, ident, recipe or {}, saved, available, metadata)
+    fix_info = {}
+    selected, reason, valve = selection(paths, ident, recipe or {}, saved, available, metadata, summary=fix_info)
     if not proton_option:
         selected, valve = None, None
+        fix_info = {"community_fix": None, "community_fix_source": None}
     takeover_fields = takeover.fields(state(paths), ident, discovery[1])
     if shortcut and not windows:
         takeover_fields["takeover"] = "n/a"
@@ -52,7 +54,7 @@ def game(paths, ident, discovery=None, metadata=None, available=None):
             **({"exe": entry["exe"], "start_dir": entry["start_dir"]} if shortcut else {}),
             **({"kind": entry["kind"]} if entry and "kind" in entry else {}),
             **takeover_fields, "valve_recommendation": valve,
-            "options": {"proton": proton_option, "takeover": windows if shortcut else True},
+            "options": {"proton": proton_option, "takeover": windows if shortcut else True}, **fix_info,
             "proton": {"name": selected["name"], "reason": reason} if selected else None}
 
 

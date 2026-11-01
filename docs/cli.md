@@ -270,11 +270,12 @@ survives retries even if Steam restores only an obsolete mapping or image.
   or `{"action":"default_off"}` without an appid for a queued global change.
   `last_apply` is null before a helper run, then the content of `logs/apply-last.json`.
 
-- `settings --json` -> `{"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true,"auto_install_ge":true,"cleanup_old_ge":true,"takeover_all":true}`.
+- `settings --json` -> `{"splash":true,"splash_seconds":4.0,"splash_parallel":false,"show_games_without_recipe":true,"check_updates_on_start":true,"auto_install_ge":true,"cleanup_old_ge":true,"takeover_all":true,"prefer_community_fixes":true}`.
   Returns all persisted settings plus defaults; reading does not write the state file.
   `settings --set key=value [--set key=value ...] --json` validates all entries before
   saving. Boolean keys `splash`, `show_games_without_recipe`,
-  `check_updates_on_start`, `auto_install_ge`, `cleanup_old_ge` and `takeover_all` accept true/false or on/off; all default on. Numeric
+  `check_updates_on_start`, `auto_install_ge`, `cleanup_old_ge`, `takeover_all` and
+  `prefer_community_fixes` accept true/false or on/off; all default on. Numeric
   `splash_seconds` defaults to 4 and clamps finite numbers to 1–10. Unknown keys,
   malformed entries, invalid booleans and nonfinite numbers fail without partial writes.
   `settings --splash on|off --splash-seconds N --json` updates either or both values
@@ -465,11 +466,17 @@ The cache retains the complete Deck `configuration`, including unknown keys, and
 the two Steam Play maps exactly as parsed (key names normalized to lowercase).
 The Deck profile wins over an app-mapping override. No real Deck appinfo was inspected.
 
-Selection precedence is installed exact recipe pin, explicit user override (or
-the game's saved pre-takeover Steam tool), then Valve recommendation for recipe-less
+Selection precedence is a usable explicit user override (or
+the game's saved pre-takeover Steam tool), then an installed exact recipe pin,
+then (with `prefer_community_fixes` on)
+the newest installed GE-Proton/UMU-Proton containing that game's community fix,
+then Valve recommendation for recipe-less
 games, then the existing fallback. A recipe without an installed pin retains its
-GE/newest fallback and does not use Valve metadata. Reasons are `pinned`,
-`user_override`, `valve_recommended`, `recipe_fallback`, or `newest`.
+GE/UMU family fallback and does not use Valve metadata when no community build wins.
+It chooses the newest installed GE/UMU family build, falling back to any installed
+Proton only if that family is absent. A usable override wins over recipe pins too.
+Reasons are `pinned`, `user_override`, `community_fix`, `valve_recommended`,
+`recipe_fallback`, or `newest`.
 `proton-experimental` selects `Proton - Experimental`; `proton-stable` selects the
 newest installed numbered Valve build; `proton_10`/`proton_10.0` and explicit build
 names match installed versions. Valve profile values `proton-11.0-beta`,
@@ -485,6 +492,53 @@ a Windows executable) log the raw value and fall back to newest; no runtime is
 downloaded. An unavailable user override falls back without trying Valve's choice.
 Launch and GAME/GAMES use the same selector; splash `proton.reason` reflects it too.
 
+Every GAME (including non-Steam registrations) and splash payload adds these
+top-level fields. Exact field projections for the UI:
+
+```json
+{"proton":{"name":"GE-Proton10-9","reason":"community_fix"},"community_fix":"applied","community_fix_source":"GE-Proton10-9"}
+```
+
+```json
+{"proton":{"name":"Proton 11.0","reason":"valve_recommended"},"community_fix":"available_not_installed","community_fix_source":null}
+```
+
+```json
+{"proton":{"name":"Proton 11.0","reason":"valve_recommended"},"community_fix":null,"community_fix_source":null}
+```
+
+`community_fix` is exactly `applied`, `available_not_installed`, or null.
+`applied` means the selected GE/UMU build contains the per-game fix; it predicts
+upstream execution, not observed game success. Its source is the selected build's
+name, even when `pinned`, `user_override` or `newest` chose that build. If an override
+or disabled preference selects Valve while a matching GE build is installed,
+both fields are null. `available_not_installed` means the cached content index
+knows the ID but no installed GE/UMU build contains it; selection is unchanged.
+Its source is null because the index contains IDs rather than a runtime build.
+With no known per-game fix both fields are null, including when no Proton exists.
+`settings --set prefer_community_fixes=on|off --json` persists the boolean; default
+is true. Turning it off changes selection only, so an explicitly selected GE
+build can still report `applied`.
+
+Discovery scans installed builds' `protonfixes/gamefixes-steam/<appid>.py` and
+`gamefixes-umu/<umu-id>.py`; it does not import code or treat `default.py` (or
+`umu-default`) as a per-game fix. Caches under `<cache>/community-fixes/` key by
+resolved build path and timestamps of the build, Proton executable, protonfixes
+root and both fix directories. Adding/removing fixes invalidates the cache;
+malformed or unwritable caches fall back to local scanning. Valve's directories
+do not count as GE/UMU fixes. Non-Steam automatic selection also prefers a matching
+umu fix behind its existing override/pin rules; Steam appids never substitute for
+umu IDs.
+
+The independent DC-36 content index optionally includes exactly
+`"community_fixes":{"steam":["42"],"umu":["umu-42"]}`. Lists contain unique
+safe IDs, at most 100,000 per kind. Invalid lists reject activation. The content
+builder derives them from the available `third_party/umu-protonfixes` checkout
+when building content, excluding defaults/helpers. Without that checkout the
+field is omitted. There is no bundled engine list or engine-version pin; `update`
+activates newer content through the normal integrity checks. Launch only reads
+that cache and installed builds, never the development submodule or network.
+
 **Not verified on hardware:** real SteamOS appinfo parsing, classification of actual
 installed depots/shortcuts, Steam recognizing per-game takeover after retry, exact
 restoration and launching via Valve's recommended runtime. Parent owns those checks.
@@ -498,7 +552,8 @@ GAME:
           "state":"installed","state_message":"Installed v0.7.0"}],"last_launch":null,
  "art":{"portrait":"/home/deck/.local/share/Steam/appcache/librarycache/2300320/0123456789012345678901234567890123456789/library_600x900.jpg",
         "hero":null,"header":null,"logo":null},
- "proton":{"name":"GE-Proton11-11","reason":"pinned"}}
+ "proton":{"name":"GE-Proton11-11","reason":"pinned"},
+ "community_fix":null,"community_fix_source":null}
 ```
 `pending` is null, `enable`, or `disable`; `last_launch` is null or
 `{"time":"ISO8601","ok":true}`. `recipe_version` is null for games without recipes.
@@ -519,7 +574,8 @@ null so the UI can use its own fallback. No artwork is downloaded.
 `proton` is null when no installed Proton is usable, otherwise an object with
 `name` and `reason`: see the selection precedence and reasons above.
 This uses launch's installed-build selector without downloads, extraction, logs,
-or state changes. Launch never downloads a Proton runtime; use update or install.
+or state changes; derived fix-ID caches may be written. Launch never downloads a
+Proton runtime; use update or install.
 
 Each mod keeps `enabled` (wanted) and `installed_version` and adds `state` and
 `state_message`. The state is one of:
@@ -639,7 +695,8 @@ game's existing launch log; the same prepared Proton arguments/environment still
 reach execve. Logging failure falls back to stderr. No display on Linux skips the UI.
 
 The UTF-8 JSON contains `name`, `appid`, `art` (the same local paths as GAME),
-`proton: {name, reason}` for the actual selected runtime, `recipe_version`,
+`proton: {name, reason}` for the actual selected runtime, `community_fix`,
+`community_fix_source` (same types/semantics as GAME), `recipe_version`,
 `fixes: {upstream_chained, wine_steps_count, wine_steps}`, `mods` with metadata,
 preference/installed version and `state`/`state_message`, `warnings`, and
 `duration_seconds`. `upstream_chained` means our managed localfix was successfully
@@ -959,10 +1016,11 @@ Clients should enable controls using these flags.
 games/launchers and returns the complete GAME. `proton_override` persists in that
 non-Steam registration (null for auto). `run-umu` sets `PROTONPATH` to the installed
 selected build; preview and splash use that same selection. An explicit usable
-override wins over a non-Steam recipe pin. Auto restores the existing umu rule:
-installed recipe pin, otherwise preferred installed GE, otherwise newest installed
-Proton. A missing override falls back to GE/newest and is retained for later use.
-No runtime is downloaded by selection. Steam selection precedence is unchanged.
+override wins over a non-Steam recipe pin. Auto selects an installed recipe pin,
+otherwise a build containing the umu ID's community fix (when preference is on),
+otherwise preferred installed GE, otherwise newest installed Proton. A missing
+override is retained for later use and falls back to community/GE/newest.
+No runtime is downloaded by selection. Steam precedence is documented above.
 Non-Steam `--takeover` returns `invalid_action` without changing either registry.
 
 **Not verified on hardware:** actual vendor silent switches/install paths through

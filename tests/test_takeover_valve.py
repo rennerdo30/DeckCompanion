@@ -340,7 +340,8 @@ def test_recipe_user_valve_newest_precedence_and_preserved_user_mapping(paths, m
     invoke(paths, "game-option", "42", "--proton", "Proton 10.0")
     assert invoke(paths, "game", "42")["proton"] == {"name": "Proton 10.0", "reason": "user_override"}
     monkeypatch.setattr(recipes, "load", lambda *a: {"runtime": {"proton": "GE-Proton11-11"}, "version": "1"})
-    assert invoke(paths, "game", "42")["proton"]["reason"] == "pinned"
+    assert invoke(paths, "game", "42")["proton"] == {"name": "Proton 10.0", "reason": "user_override"}
+    assert invoke(paths, "game-option", "42", "--proton", "auto")["proton"]["reason"] == "pinned"
     monkeypatch.setattr(recipes, "load", lambda *a: None)
     invoke(paths, "game-option", "42", "--proton", "auto")
     doc = {}

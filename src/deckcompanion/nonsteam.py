@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import unicodedata
 import zlib
-from . import content, net, recipes, splash, steam, umu
+from . import community, content, net, recipes, splash, steam, umu
 from .common import Error, inside, locked, now, read_json, save_state, state
 
 
@@ -79,12 +79,18 @@ def roots(paths, saved):
     return inside(paths.data, f"prefixes/{saved['slug']}"), Path(saved["exe"]).parent
 
 
-def selection(paths, saved, recipe=None, log=lambda message: None):
+def selection(paths, saved, recipe=None, log=lambda message: None, summary=None):
     from .launch import select_proton
     # A nonempty fallback recipe retains umu's existing GE-preferred automatic rule.
-    return select_proton(steam.proton(paths, log),
+    builds = steam.proton(paths, log)
+    matches, known = community.available(paths, saved["umu_id"], builds)
+    selected, reason = select_proton(builds,
                          {"runtime": {}} if saved.get("proton_override") else recipe or {"runtime": {}},
-                         saved.get("proton_override"), log=log)
+                         saved.get("proton_override"), log=log,
+                         community_builds=matches if state(paths).get("settings", {}).get("prefer_community_fixes", True) else ())
+    if summary is not None:
+        summary.update(community.fields(selected, matches, known))
+    return selected, reason
 
 
 def artwork(paths, saved):
@@ -119,7 +125,8 @@ def runtime(paths, saved, budget, log=lambda message: None, recipe=None):
 
 def game(paths, saved):
     recipe = recipes.load(paths, saved["umu_id"]) or {}
-    proton, reason = selection(paths, saved, recipe)
+    fix_info = {}
+    proton, reason = selection(paths, saved, recipe, summary=fix_info)
     prefix, folder = roots(paths, saved)
     manifest = read_json(paths.data / "manifests" / f"{saved['appid']}.json", {"mods": {}})
     mods = []
@@ -134,7 +141,7 @@ def game(paths, saved):
             "recipe_version": recipe.get("version"), "mods": mods, "last_launch": saved.get("last_launch"),
             "notes": recipe.get("notes", ""), "art": artwork(paths, saved),
             "takeover": "n/a", "previous_mapping": None, "valve_recommendation": None,
-            "options": {"proton": True, "takeover": False},
+            "options": {"proton": True, "takeover": False}, **fix_info,
             "proton": dict(proton, reason=reason) if proton else None}
 
 

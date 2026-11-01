@@ -39,6 +39,9 @@ def validate(index, check_engine=True):
         recipes.validate(hashed_text(entry), ident)
     if "launchers" in index:
         hashed_text(index["launchers"])
+    if "community_fixes" in index:
+        from .community import validate as validate_fixes
+        validate_fixes(index["community_fixes"])
     if check_engine and recipes.version_key(__version__) < recipes.version_key(minimum):
         raise Error("engine_too_old", f"Content requires engine {minimum}; running {__version__}")
     return index
