@@ -12,6 +12,85 @@ means success; errors exit 1 with
 `{"error":{"code":"steam_running","message":"..."}}`. Parser errors follow this
 contract too. `--help` is the human help exception. No progress messages on stdout.
 
+## Decky Loader and independent plugin
+
+```sh
+deckcompanion decky status --json
+deckcompanion decky install --json
+deckcompanion decky panel --json
+deckcompanion decky panel --appid 2300320 --json
+deckcompanion decky plugin-status --json
+deckcompanion decky plugin-install --json
+```
+
+`decky status` returns `installed` (the `~/homebrew/services/PluginLoader` file),
+`version` from `~/homebrew/services/.loader.version` (nullable), `service` from
+unprivileged `systemctl is-active plugin_loader` (5-second timeout; `unknown` if
+unavailable), and `latest: {version, source, stale, checked_at?}`. Latest stable
+Loader metadata comes from GitHub `SteamDeckHomebrew/decky-loader/releases/latest`,
+cached for six hours. Offline/rate-limited lookup keeps stale cached metadata;
+without a cache the latest version is null, never guessed from a bundled pin.
+
+`decky install` returns `{needs_desktop: true, command, instructions, launched}`.
+The command is the official fast installer:
+
+```sh
+curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh | sh
+```
+
+Decky installs a system service and its installer needs root. DeckCompanion never
+collects, stores or forwards passwords. In a Linux Desktop graphical session
+(DISPLAY or WAYLAND_DISPLAY, outside Game Mode), with Konsole and systemd-run
+available, it submits a separate user unit running Konsole and that command.
+The official installer prompts for sudo in its own terminal. Submission times out
+after five seconds; the detached terminal has a 30-minute maximum lifetime.
+`launched: true` confirms scheduling only, not successful installation. In Game Mode,
+headless sessions, Windows or failed handoffs, run the command manually in Desktop
+Konsole. No automatic session switch, service restart or sudo wrapper is provided.
+Rerunning the official installer supplies the supported Loader update/reinstall path.
+
+`decky panel` returns `{game: GAME|null, selection, settings, proton, shortcut_appid}`
+without network. It prefers the optional current Steam appid, otherwise a running
+game, then the most recently played/launched game from Steam and engine history.
+The full-app shortcut is excluded. Empty history returns null, not an arbitrary
+recipe. GAME adds the saved nullable `proton_override`; recipe, selected Proton/reason,
+mod states and last-launch fields retain their normal meanings. `proton` lists
+installed builds. `shortcut_appid` is the unsigned decimal appid of the actual owned
+shortcut, or null until installed/applied for the active Steam account. General
+`status` also adds this field; the plugin passes it to `SteamClient.Apps.RunGame`.
+
+The panel uses `enable`/`disable`, `mod`, `game-option --proton` (or `auto`) and
+`settings --splash`. Mapping changes stay queued, with an Apply message. Every backend
+subprocess is recorded, has a 20-second timeout and a 2-MiB stdout cap, and is cleaned
+up on timeout/unload. Registered `kind: non_steam` games expose mods and splash but
+disable routing and Proton choice by default. Future GAME `options.takeover` and
+`options.proton` booleans override that default as engine support becomes available.
+
+`decky plugin-status` returns the installed plugin version, `decky_installed`,
+`plugins_writable`, `can_install`, instructions and independent `latest` metadata.
+It queries GitHub releases (up to ten 100-item pages within the network budget),
+selecting the highest stable `decky-vMAJOR.MINOR.PATCH` with a matching
+`deckcompanion-decky-<version>.zip`, repository HTTPS URL, size at most 8 MiB and
+GitHub `sha256:` digest. Engine/prerelease tags are ignored. This has a separate
+six-hour cache and stale fallback. Before a plugin release exists, it reports
+`source: unavailable` and `can_install: false`.
+
+`decky plugin-install` checks the downloaded SHA256 before writes. It requires
+installed Decky and existing user-writable `~/homebrew/plugins`. It extracts only
+expected files with an expansion limit and matching package version. No root,
+chmod/chown or password handling. Modified/unowned plugins are preserved with
+`reason: existing_plugin_preserved`. Engine-managed updates verify the old receipt,
+retain `.DeckCompanion-previous-<timestamp>`, and roll back on activation/receipt
+failure. Bytecode caches do not count as edits. `changed` distinguishes update/no-op;
+reload plugins in Decky after success. Receipt: `decky-plugin-installed.json` in the
+engine data directory. Engine versions, recipes and the current pointer are untouched.
+For root-owned directories or manual plugin updates, use Decky's developer
+**Install Plugin from ZIP** action. Manual installations remain Decky-owned.
+
+Build the plugin separately under `decky-v<version>`; it never enters an engine
+tarball or requires an engine version bump. See `decky-plugin/README.md` for builds,
+verified dependency versions and open hardware checks.
+
 ## Non-Steam Windows games
 
 ```sh

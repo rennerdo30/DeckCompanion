@@ -3,5 +3,6 @@ __pycache__/
 .pytest_cache/
 dist/
 .venv/
+node_modules/
 
 /bin/deckcompanion-ui
