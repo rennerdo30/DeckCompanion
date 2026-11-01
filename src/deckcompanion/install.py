@@ -8,7 +8,7 @@ from dataclasses import replace
 from . import __version__, content, localfix, net, recipes, steam, update
 from .common import Error, atomic, component, now, read_json, save_state, state, write_json
 
-PAYLOAD = ("src", "vdf", "recipes", "compat", "docs", "bin", "assets/logo", "assets/steam", "LICENSE", "THIRD_PARTY_NOTICES.md",
+PAYLOAD = ("src", "vdf", "recipes", "content", "compat", "docs", "bin", "assets/logo", "assets/steam", "LICENSE", "THIRD_PARTY_NOTICES.md",
            "compatibilitytool.vdf", "toolmanifest.vdf", "install.sh", "uninstall.sh", "DeckCompanion-Installer.desktop")
 
 
@@ -89,8 +89,9 @@ def install(paths, source):
         data["shortcut_pending"] = True
     data["default_pending"] = "default_on"
     if index is not None:
+        write_json(paths.cache / "engine-index.json", dict(index, fetched_at=now()))
         merged = recipes.merge_index(read_json(paths.cache / "index.json"), index)
-        write_json(paths.cache / "index.json", dict(merged, fetched_at=now()))
+        write_json(paths.cache / "index.json", dict(merged, fetched_at=merged.get("fetched_at") if merged.get("content_version") else now()))
     installed_paths = replace(paths, recipes=target / "recipes")
     recipes.refresh_cache(installed_paths)
     budget = net.Budget()

@@ -536,3 +536,38 @@ while Steam runs it schedules the detached helper without waiting for shutdown.
 It requires Steam closed, restores prior mappings, and preserves user changes and
 state/cache/backups. `preserved` lists modified files. See the README for migration.
 No command or integration has been verified on hardware.
+
+## Independent channel status
+
+`status --json` preserves its existing fields and adds `channels`. This is a
+read-only cache snapshot; missing versions/timestamps are JSON `null`:
+
+```json
+{
+  "channels": {
+    "engine": {"current": "0.4.3", "available": "0.4.3"},
+    "content": {"version": null, "fetched_at": null, "state": "bundled"},
+    "mods": {"resolved": {}, "updated_at": null},
+    "umu": {"version": null}
+  }
+}
+```
+
+After Update, `content.version` is the active content version and `fetched_at` is
+its activation timestamp. `state` describes the last refresh: `current`, `cached`,
+`bundled`, `unavailable`, `network_timeout`, `download_failed`, `engine_too_old`,
+`invalid_index`, `checksum_mismatch`, or `unsupported_signature`. Failed refreshes
+retain the active version and may add `message`. A versionless offline install
+keeps bundled recipes available. Engine versions are installed/available versions;
+the top-level `version` continues to identify the running engine.
+
+`mods.resolved` is a map keyed by `owner/repo/asset-name`. Each value contains
+`release_repo`, `asset`, `version`, `url`, `sha256` and `warning` (null when the API
+provided a SHA256). `mods.updated_at` is the last successful resolution timestamp.
+`umu.version` is the active verified runtime version, or null before installation.
+
+`update --json` also returns `channels`, `content` (including `updated`) and `mods`
+(including per-mod failure `warnings`) alongside the existing engine/index,
+Proton, umu and Steam-pending fields. `index` retains its legacy engine-index
+meaning. `umu install --pin <release-tag> --json` persists a runtime pin; use
+`--pin latest` to resume upstream tracking. See [updates and publishing](updates.md).

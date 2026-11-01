@@ -1,6 +1,7 @@
 """GitHub release updates with SHA256, immutable version directories and rollback."""
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import tempfile
@@ -8,7 +9,18 @@ import tomllib
 from . import __version__, archives, net, recipes
 from .common import Error, atomic, component, now, read_json, write_json
 
-RELEASE_API = "https://api.github.com/repos/rennerdo30/DeckCompanion/releases/latest"
+RELEASE_API = "https://api.github.com/repos/rennerdo30/DeckCompanion/releases"
+
+
+def engine_release(paths):
+    from . import channels
+    preview = os.environ.get("DECKCOMPANION_ENGINE_PRERELEASES") == "1"
+    releases = channels.releases(paths, net.Budget(2), os.environ.get("DECKCOMPANION_RELEASE_API", RELEASE_API), preview)
+    candidates = [r for r in releases if re.fullmatch(r"v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", r.get("tag_name", ""))
+                  and (preview or "-" not in r["tag_name"])]
+    if not candidates:
+        raise Error("unavailable", "No published engine v<semver> release")
+    return max(candidates, key=lambda r: r.get("published_at", ""))
 
 
 def current(paths):
@@ -105,24 +117,36 @@ def json_url(paths, url, filename, budget=None):
 
 
 def update(paths):
-    cached = read_json(paths.cache / "index.json")
+    from . import channels
+    from .common import locked, state, save_state
+    cached = read_json(paths.cache / "engine-index.json")
+    if cached is None:
+        legacy = read_json(paths.cache / "index.json", {})
+        cached = legacy if "engine" in legacy else None
     index, fetched = cached, False
     try:
         url = os.environ.get("DECKCOMPANION_INDEX_URL")
         if not url:
-            release = json_url(paths, os.environ.get("DECKCOMPANION_RELEASE_API", RELEASE_API), "release-response.json")
+            release = engine_release(paths)
             url = next(a["browser_download_url"] for a in release["assets"] if a["name"] == "index.json")
         candidate = validate_index(json_url(paths, url, "index-response.json"))
         candidate["fetched_at"] = now()
-        write_json(paths.cache / "index.json", candidate)  # Atomic activation of all recipes.
+        write_json(paths.cache / "engine-index.json", candidate)
+        with locked(paths):
+            active = read_json(paths.cache / "index.json", {})
+            if not active.get("content_version") and candidate.get("recipes"):
+                write_json(paths.cache / "index.json", recipes.merge_index(active, candidate))
         index, fetched = candidate, True
-    except (Error, OSError, ValueError, TypeError, KeyError, StopIteration):
+    except channels.FAILURES:
         # Offline / invalid new index never replaces the last validated cache.
         if cached:
-            validate_index(cached)
+            try:
+                validate_index(cached)
+            except channels.FAILURES:
+                index = None
     old = current(paths)
     had_pointer = (paths.data / "current").exists()
-    available, updated = old, False
+    available, updated, engine_error = old, False, None
     if index:
         engine = index["engine"]
         available = engine["version"]
@@ -131,23 +155,27 @@ def update(paths):
                 source = net.cached(paths, engine["url"], engine["sha256"])
                 install_engine(paths, source, available, engine["sha256"])
                 updated = current(paths) != old or not had_pointer
-            except Error as exc:
-                if exc.code not in ("network_timeout", "download_failed"):
-                    raise
+            except (Error, OSError) as exc:
+                engine_error = str(exc)  # Other channels still refresh after an engine failure.
+    content_status = channels.refresh(paths)
+    mod_status = channels.resolve_mods(paths)
     from . import proton, umu
     try:
         runtime = umu.install(paths)
     except Exception as exc:
         runtime = {"installed": False, "error": str(exc)}
     from . import takeover, steam
-    from .common import locked, state, save_state
     with locked(paths):
         data = state(paths)
         takeover.reconcile(paths, data, uninstall=data.get("uninstalling", False))
         steam.prune_pending(paths, data)
         save_state(paths, data)
         pending = steam.has_pending(data)
+    engine_status = {"current": current(paths), "available": available, "updated": updated}
+    if engine_error:
+        engine_status["error"] = engine_error
     return {"steam_changes_pending": pending,
-            "engine": {"current": current(paths), "available": available, "updated": updated},
+            "engine": engine_status,
             "index": {"updated": fetched, "fetched_at": index.get("fetched_at") if index else None},
+            "content": content_status, "mods": mod_status, "channels": channels.snapshot(paths),
             "proton": proton.sync(paths), "umu": runtime}

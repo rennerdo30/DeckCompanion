@@ -10,7 +10,7 @@ proton = "GE-Proton11-11"
 [[mods]]
 id = "fs25-deck-mode"
 name = "FS25 Deck Mode"
-version = "unresolved"
+version = "latest"
 url = "https://github.com/rennerdo30/FS25_DeckMode/releases/latest"
 sha256 = ""
 release_repo = "rennerdo30/FS25_DeckMode"

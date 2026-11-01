@@ -239,7 +239,7 @@ def test_release_includes_steam_art_and_standalone_assets(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize("bad_hash", [False, True])
-def test_standalone_bootstrap_latest_urls_checksum_and_apply(tmp_path, monkeypatch, bad_hash):
+def test_standalone_bootstrap_engine_tag_urls_checksum_and_apply(tmp_path, monkeypatch, bad_hash):
     script = (ROOT / "install.sh").read_text()
     code = script.split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
     buffer = io.BytesIO()
@@ -250,12 +250,19 @@ def test_standalone_bootstrap_latest_urls_checksum_and_apply(tmp_path, monkeypat
         tar.addfile(info, io.BytesIO(data))
     payload = buffer.getvalue()
     urls, calls = [], []
-    base = "https://github.com/rennerdo30/DeckCompanion/releases/latest/download/"
+    base = "https://github.com/rennerdo30/DeckCompanion/releases/download/v0.3.0/"
+    api = "https://api.github.com/repos/rennerdo30/DeckCompanion/releases?per_page=100&page=1"
     def urlopen(request, timeout):
         url = request.full_url
         urls.append(url)
-        assert url.startswith(base), "bootstrap must use release assets, not API metadata"
-        if url.endswith("index.json"):
+        if url == api:
+            releases = [{"tag_name": tag, "published_at": date, "assets": [{"name": "index.json", "browser_download_url": base + "index.json"}], **flags}
+                        for tag, date, flags in [("v0.3.0", "2026-10-01", {}), ("content-2026.11.01.1", "2026-11-01", {}),
+                            ("decky-v9.0.0", "2026-11-02", {}), ("v99.0.0", "2026-11-03", {"draft": True}),
+                            ("v98.0.0", "2026-11-04", {"prerelease": True})]]
+            data = json.dumps(releases).encode()
+        elif url.endswith("index.json"):
+            assert url.startswith(base), "bootstrap must select the engine asset"
             data = json.dumps({"engine": {"url": base + "deckcompanion-0.3.0.tar.gz", "sha256": "0" * 64 if bad_hash else hashlib.sha256(payload).hexdigest()}}).encode()
         else:
             data = payload
@@ -284,7 +291,7 @@ def test_standalone_bootstrap_latest_urls_checksum_and_apply(tmp_path, monkeypat
         assert exited.value.code == 0
         assert len(calls) == 2
         assert "install" in calls[0] and "apply" in calls[1] and "--restart-steam" in calls[1]
-    assert urls[0] == base + "index.json"
+    assert urls[:2] == [api, base + "index.json"]
 
 
 def test_piped_shell_uses_bootstrap_even_inside_a_checkout(tmp_path):

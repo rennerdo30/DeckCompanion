@@ -55,7 +55,13 @@ def validate(recipe, expected=None):
             require(item.get("root", "prefix") in ("prefix", "game"), "root must be prefix or game")
             inside(Path.cwd(), item.get("target"))
             if collection == "mods":
-                require(all(isinstance(item.get(k), str) for k in ("name", "version", "url", "sha256")), "Mod metadata must be strings")
+                require(all(isinstance(item.get(k), str) for k in ("name", "version")), "Mod metadata must be strings")
+                if item["version"] == "latest":
+                    require(isinstance(item.get("release_repo"), str) and bool(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", item["release_repo"])), "latest requires release_repo")
+                    require(isinstance(item.get("asset"), str) and bool(item["asset"]), "latest requires asset")
+                    item.setdefault("url", "https://github.com/" + item["release_repo"] + "/releases/latest")
+                    item.setdefault("sha256", "")
+                require(all(isinstance(item.get(k), str) for k in ("url", "sha256")), "Mod download metadata must be strings")
                 require(item.get("mode") in ("copy", "extract_zip"), "Invalid mod mode")
                 require(type(item.get("enabled", True)) is bool, "enabled must be boolean")
                 require(urlsplit(item["url"]).scheme == "https", "Mod URL must use HTTPS")
@@ -84,8 +90,11 @@ def candidates(paths, appid):
     result = []
     if indexed:
         try:
+            if hashlib.sha256(indexed["toml"].encode()).hexdigest() != indexed["sha256"]:
+                raise Error("checksum_mismatch", f"Cached recipe checksum mismatch: {appid}")
             recipe = validate(tomllib.loads(indexed["toml"]), appid)
-            result.append((recipe, indexed.get("engine_version", index.get("engine", {}).get("version", "0")), indexed["toml"]))
+            result.append((recipe, indexed.get("engine_version", index.get("engine", {}).get("version", "0")), indexed["toml"],
+                           indexed.get("content_version", index.get("content_version", ""))))
         except (ValueError, TypeError, KeyError) as exc:
             raise Error("invalid_recipe", f"Invalid cached recipe {appid}") from exc
     for source, engine in ((paths.cache / "recipes" / f"{appid}.toml", "0"),
@@ -101,24 +110,31 @@ def candidates(paths, appid):
 
 
 def rank(candidate):
-    return version_key(candidate[0]["version"]), version_key(candidate[1])
+    content = candidate[3] if len(candidate) > 3 else ""
+    return version_key(candidate[0]["version"]), bool(content), version_key(content or candidate[1])
 
 
-def load(paths, appid):
+def load(paths, appid, resolve=True):
     choices = candidates(paths, appid)
-    return max(choices, key=rank)[0] if choices else None
+    recipe = max(choices, key=rank)[0] if choices else None
+    if recipe and resolve:
+        from .channels import cached_mod
+        recipe = dict(recipe, mods=[cached_mod(paths, mod) for mod in recipe.get("mods", [])])
+    return recipe
 
 
 def merge_index(previous, incoming):
     """Activating an engine index must not downgrade any already cached recipe."""
-    merged = dict(incoming, recipes={})
+    base = dict(previous, engine=incoming["engine"]) if previous and previous.get("content_version") and "engine" in incoming else incoming
+    merged = dict(base, recipes={})
     for index in (previous or {}, incoming):
         for ident, item in index.get("recipes", {}).items():
-            item = dict(item, engine_version=item.get("engine_version", index.get("engine", {}).get("version", "0")))
+            item = dict(item, engine_version=item.get("engine_version", index.get("engine", {}).get("version", "0")),
+                        content_version=item.get("content_version", index.get("content_version", "")))
             old = merged["recipes"].get(ident)
             def key(entry):
-                return rank((validate(tomllib.loads(entry["toml"]), ident), entry["engine_version"]))
-            if not old or key(item) > key(old):
+                return rank((validate(tomllib.loads(entry["toml"]), ident), entry["engine_version"], entry["toml"], entry["content_version"]))
+            if not old or key(item) > key(old) or (item["content_version"] and key(item) == key(old)):
                 merged["recipes"][ident] = item
     return merged
 
@@ -134,8 +150,10 @@ def refresh_cache(paths):
         best = max(choices, key=rank)
         current = index.get("recipes", {}).get(ident)
         if current and (current["toml"] != best[2] or
-                        version_key(current.get("engine_version", index.get("engine", {}).get("version", "0"))) < version_key(best[1])):
+                        rank((validate(tomllib.loads(current["toml"]), ident), current.get("engine_version", index.get("engine", {}).get("version", "0")), current["toml"],
+                              current.get("content_version", index.get("content_version", "")))) < rank(best)):
             index["recipes"][ident] = {"toml": best[2], "engine_version": best[1],
+                                      "content_version": best[3] if len(best) > 3 else "",
                                       "sha256": hashlib.sha256(best[2].encode()).hexdigest()}
             changed = True
         cached = paths.cache / "recipes" / f"{ident}.toml"

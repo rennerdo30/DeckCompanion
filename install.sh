@@ -8,7 +8,7 @@ esac
 if [ -z "$root" ] || [ ! -f "$root/src/deckcompanion/__main__.py" ]; then
   printf '%s\n' 'DeckCompanion: downloading the latest release (no root required).'
   timeout 300s python3 - "$@" <<'PY'
-import hashlib, json, os, pathlib, shutil, subprocess, sys, tarfile, tempfile, urllib.request
+import hashlib, json, os, pathlib, re, shutil, subprocess, sys, tarfile, tempfile, urllib.request
 
 def get(url, limit):
     if not url.startswith('https://'):
@@ -34,11 +34,31 @@ def run(command, env):
     if result:
         raise SystemExit(result)
 
+def release_index():
+    api = os.environ.get('DECKCOMPANION_RELEASE_API', 'https://api.github.com/repos/rennerdo30/DeckCompanion/releases')
+    preview = os.environ.get('DECKCOMPANION_ENGINE_PRERELEASES') == '1'
+    releases = []
+    for page in range(1, 11):
+        batch = json.loads(get(f'{api}?per_page=100&page={page}', 8 * 1024 * 1024))
+        if not isinstance(batch, list):
+            raise ValueError('Expected GitHub releases list')
+        releases.extend(batch)
+        if len(batch) < 100:
+            break
+    else:
+        raise ValueError('Release listing exceeds bounded pagination')
+    candidates = [r for r in releases if not r.get('draft') and (preview or not r.get('prerelease'))
+                  and re.fullmatch(r'v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?', r.get('tag_name', ''))
+                  and (preview or '-' not in r['tag_name'])]
+    if not candidates:
+        raise ValueError('No published engine v<semver> release')
+    selected = max(candidates, key=lambda r: r.get('published_at', ''))
+    return next(a['browser_download_url'] for a in selected['assets'] if a['name'] == 'index.json')
+
 with tempfile.TemporaryDirectory(prefix='deckcompanion-install-') as temp:
     work = pathlib.Path(temp)
-    base = 'https://github.com/rennerdo30/DeckCompanion/releases/latest/download/'
     print('DeckCompanion: downloading release index.', flush=True)
-    index = json.loads(get(os.environ.get('DECKCOMPANION_INDEX_URL', base + 'index.json'), 8 * 1024 * 1024))
+    index = json.loads(get(os.environ.get('DECKCOMPANION_INDEX_URL') or release_index(), 8 * 1024 * 1024))
     engine = index['engine']
     print('DeckCompanion: downloading engine and checking SHA256.', flush=True)
     payload = get(engine['url'], 512 * 1024 * 1024)
