@@ -32,7 +32,7 @@ def parser():
     root = Parser(prog="deckcompanion")
     root.add_argument("--json", action="store_true")
     commands = root.add_subparsers(dest="command", required=True)
-    for name in ("games", "game", "enable", "disable", "mod", "apply", "status"):
+    for name in ("games", "game", "enable", "disable", "mod", "apply", "status", "update", "rollback"):
         sub = commands.add_parser(name)
         sub.add_argument("--json", action="store_true")
         if name in ("game", "enable", "disable", "mod"):
@@ -54,6 +54,9 @@ def parser():
 def execute(args, paths):
     name = args.command
     data = state(paths)
+    if name in ("update", "rollback"):
+        from . import update
+        return getattr(update, name)(paths)
     if name == "games":
         identifiers = set(steam.installed(paths)) | recipes.ids(paths) | set(data["games"])
         return {"games": [game(paths, ident) for ident in sorted(identifiers, key=int)]}
@@ -99,7 +102,7 @@ def main(argv=None):
             result = execute(args, paths)
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    except (Error, OSError, ValueError, TypeError, KeyError) as exc:
+    except Exception as exc:
         print(json.dumps({"error": {"code": getattr(exc, "code", "operation_failed"), "message": str(exc)}}))
         return 1
 

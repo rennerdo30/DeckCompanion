@@ -3,7 +3,7 @@ from pathlib import Path
 import re
 import tomllib
 from urllib.parse import urlsplit
-from .common import Error, app_id, component, inside
+from .common import Error, app_id, component, inside, read_json
 
 
 def validate(recipe, expected=None):
@@ -64,6 +64,13 @@ def validate(recipe, expected=None):
 
 def load(paths, appid):
     appid = app_id(appid)
+    index = read_json(paths.cache / "index.json", {})
+    indexed = index.get("recipes", {}).get(appid)
+    if indexed:
+        try:
+            return validate(tomllib.loads(indexed["toml"]), appid)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise Error("invalid_recipe", f"Invalid cached recipe {appid}") from exc
     cached = paths.cache / "recipes" / f"{appid}.toml"
     bundled = paths.recipes / f"{appid}.toml"
     source = cached if cached.exists() else bundled
@@ -76,4 +83,5 @@ def load(paths, appid):
 
 
 def ids(paths):
-    return {p.stem for root in (paths.recipes, paths.cache / "recipes") for p in root.glob("*.toml") if p.stem.isdigit()}
+    bundled = {p.stem for root in (paths.recipes, paths.cache / "recipes") for p in root.glob("*.toml") if p.stem.isdigit()}
+    return bundled | set(read_json(paths.cache / "index.json", {}).get("recipes", {}))

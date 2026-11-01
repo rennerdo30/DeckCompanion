@@ -72,5 +72,13 @@ environment and DLL overrides apply each invocation. Foreign localfixes are
 preserved. Prefix content is deferred until a subsequent launch when `pfx` exists.
 Symlinked Documents directories outside the prefix are refused and logged.
 
-Upcoming stacked slice adds `update`, `rollback`, `install`, `uninstall`.
+## Update and rollback (slice 3a)
+
+`update --json` -> `{"engine":{"current":"0.2.0","available":"0.2.0","updated":false},"index":{"updated":false,"fetched_at":null}}`.
+`fetched_at` is an ISO8601 string after the first successful fetch; null if none.
+Offline operation uses the cache. A cached release can still install offline.
+`rollback --json` -> `{"version":"0.1.0","rolled_back":true}`; no previous version
+is an error. See [updates.md](updates.md) for integrity, cache and signing limits.
+
+Upcoming stacked slice adds `install`, `uninstall`.
 No command or integration has been verified on hardware.
