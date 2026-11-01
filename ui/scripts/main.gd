@@ -40,15 +40,31 @@ func _ready() -> void:
 	_refresh()
 	_capture_if_requested()
 
+const ALL_DEVICES := -1
+
 func _setup_actions() -> void:
 	for spec in [["dc_x", KEY_X, JOY_BUTTON_X],["dc_y", KEY_Y, JOY_BUTTON_Y],["dc_left", KEY_Q, JOY_BUTTON_LEFT_SHOULDER],["dc_right", KEY_E, JOY_BUTTON_RIGHT_SHOULDER]]:
 		InputMap.add_action(spec[0])
 		var key := InputEventKey.new()
 		key.physical_keycode = spec[1]
 		InputMap.action_add_event(spec[0],key)
-		var joy := InputEventJoypadButton.new()
-		joy.button_index = spec[2]
-		InputMap.action_add_event(spec[0],joy)
+		InputMap.action_add_event(spec[0],_joy_button(spec[2]))
+	# On the Steam Deck, Steam Input exposes a virtual gamepad that is not device 0,
+	# so every controller binding must match all devices (hardware check 2026-11-01).
+	for spec in [["ui_accept", JOY_BUTTON_A],["ui_cancel", JOY_BUTTON_B],["ui_up", JOY_BUTTON_DPAD_UP],["ui_down", JOY_BUTTON_DPAD_DOWN],["ui_left", JOY_BUTTON_DPAD_LEFT],["ui_right", JOY_BUTTON_DPAD_RIGHT]]:
+		InputMap.action_add_event(spec[0],_joy_button(spec[1]))
+	for spec in [["ui_up", JOY_AXIS_LEFT_Y, -1.0],["ui_down", JOY_AXIS_LEFT_Y, 1.0],["ui_left", JOY_AXIS_LEFT_X, -1.0],["ui_right", JOY_AXIS_LEFT_X, 1.0]]:
+		var motion := InputEventJoypadMotion.new()
+		motion.device = ALL_DEVICES
+		motion.axis = spec[1]
+		motion.axis_value = spec[2]
+		InputMap.action_add_event(spec[0],motion)
+
+static func _joy_button(button: JoyButton) -> InputEventJoypadButton:
+	var joy := InputEventJoypadButton.new()
+	joy.device = ALL_DEVICES
+	joy.button_index = button
+	return joy
 
 func _style(bg: Color, border: Color = Color.TRANSPARENT) -> StyleBoxFlat:
 	var box := StyleBoxFlat.new()
@@ -182,6 +198,9 @@ func _completed(command: String, data: Dictionary) -> void:
 				_request("status")
 				return
 			"status": status = data
+			"default":
+				status = data
+				notice = "Change saved. Apply when you’re ready."
 			"game": selected = data
 			"enable", "disable", "mod":
 				selected.merge(data,true)
@@ -196,7 +215,8 @@ func _completed(command: String, data: Dictionary) -> void:
 				_request("status")
 				return
 			"apply":
-				notice = "Changes applied. Mock Steam restart completed." if backend.mock else "Changes applied. Steam is restarting."
+				if data.get("scheduled", false): notice = "Steam is restarting now to apply your changes…"
+				else: notice = "Changes applied. Mock Steam restart completed." if backend.mock else "Changes applied. Steam is restarting."
 				_refresh()
 				return
 	_render()
@@ -223,7 +243,7 @@ func _render() -> void:
 	elif detail and not selected.is_empty(): _detail_screen()
 	else: _games_screen()
 	var count: int = status.get("pending",[]).size()
-	pending_label.text = "%s game%s with pending changes" % [count,"" if count == 1 else "s"] if count else "Everything is up to date  ·  No pending changes"
+	pending_label.text = "%s pending change%s" % [count,"" if count == 1 else "s"] if count else "Everything is up to date  ·  No pending changes"
 	apply_button.disabled = count == 0 or backend.busy
 	if not apply_button.disabled: controls.append(apply_button)
 	hints.keyboard = keyboard
@@ -305,8 +325,8 @@ func _detail_screen() -> void:
 	mods.add_child(_label("Mods & recipe",23))
 	if selected.mods.is_empty(): _paragraph(mods,"No optional mods in this recipe." if selected.has_recipe else "A recipe isn’t available yet. Steam will launch this game normally.")
 	for mod in selected.mods:
-		var version: String = "latest" if mod.version == "unresolved" else "v" + mod.version
-		var installed: String = "Not installed yet" if mod.get("installed_version") == null else "Installed v" + str(mod.installed_version)
+		var version: String = "latest" if mod.version == "unresolved" else (mod.version if mod.version.begins_with("v") else "v" + mod.version)
+		var installed: String = "Not installed yet" if mod.get("installed_version") == null else "Installed " + (str(mod.installed_version) if str(mod.installed_version).begins_with("v") else "v" + str(mod.installed_version))
 		var state: String = ("On  ·  " if mod.enabled else "Off  ·  ") + installed
 		var mod_button := _button(("✓   " if mod.enabled else "○   ") + mod.name + "   " + version + "      " + state,_toggle_mod.bind(mod),mods,"mod"+mod.id)
 		mod_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
@@ -334,6 +354,14 @@ func _updates_screen() -> void:
 	var column := VBoxContainer.new()
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(column)
+	var defaults := _card(column)
+	defaults.add_child(_label("Default for all games",23))
+	var pending_actions: Array = status.get("pending",[]).map(func(p): return p.get("action",""))
+	var is_default: bool = status.get("default_tool",false)
+	if pending_actions.has("default_on"): is_default = true
+	elif pending_actions.has("default_off"): is_default = false
+	_paragraph(defaults,"Every Windows game without its own setting runs through DeckCompanion and uses the newest installed Proton. Games with a recipe get their fixes and mods." if is_default else "Only games you enable here run through DeckCompanion. Other games keep Steam’s own Proton choice.")
+	_button("Stop using as default" if is_default else "Use DeckCompanion for all games",func(): _request("default",["--off" if is_default else "--on"]),defaults,"default")
 	var engine := _card(column)
 	engine.add_child(_label("Engine  /  " + str(status.get("version","Not connected")),26))
 	var available: String = str(update.get("engine",{}).get("available","Not checked"))
@@ -401,7 +429,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	if is_instance_valid(log_view) and not dialog.visible:
-		var axis := Input.get_joy_axis(0,JOY_AXIS_RIGHT_Y)
+		var axis := 0.0
+		for device in Input.get_connected_joypads():
+			var value := Input.get_joy_axis(device,JOY_AXIS_RIGHT_Y)
+			if absf(value) > absf(axis): axis = value
 		if Input.is_physical_key_pressed(KEY_PAGEDOWN): axis = 1.0
 		if Input.is_physical_key_pressed(KEY_PAGEUP): axis = -1.0
 		if absf(axis) > 0.25: log_view.scroll_vertical += int(axis*420*delta)

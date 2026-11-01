@@ -5,6 +5,8 @@ var scenario := ""
 var busy := false
 var games: Array = []
 var mod_pending: Dictionary = {}
+var default_tool := false
+var default_pending = null
 var worker: Thread
 var active := ""
 
@@ -43,7 +45,7 @@ static func parse_response(raw: String, exit_code: int, command: String) -> Dict
 			if data.get("log_tail") is Array:
 				for line in data.log_tail:
 					if not line is String: valid = false
-		"status":
+		"status", "default":
 			valid = data.get("version") is String and data.get("steam_running") is bool and data.get("pending") is Array and data.get("proton") is Array
 			if valid:
 				for build in data.proton:
@@ -120,9 +122,14 @@ func mock_response(command: String, args: Array = []) -> Dictionary:
 	if scenario == "offline" and command == "update": return fixture("offline")
 	if command == "games": return {"games": [] if scenario == "empty" else games.duplicate(true)}
 	if command == "update": return fixture("update")
+	if command == "default":
+		default_pending = null if (args[0] == "--on") == default_tool else ("default_on" if args[0] == "--on" else "default_off")
+		return mock_response("status")
 	if command == "status":
 		var result := fixture("status")
 		result.pending = games.filter(func(g): return g.get("pending") != null or mod_pending.has(g.appid)).map(func(g): return {"appid": g.appid})
+		if default_pending != null: result.pending.append({"action": default_pending})
+		result.default_tool = default_tool
 		return result
 	if command == "apply":
 		var applied: Array = []
@@ -133,6 +140,10 @@ func mock_response(command: String, args: Array = []) -> Dictionary:
 				game.pending = null
 				for mod in game.mods: mod.installed_version = mod.version if mod.enabled else null
 		mod_pending.clear()
+		if default_pending != null:
+			default_tool = default_pending == "default_on"
+			applied.append(default_pending)
+			default_pending = null
 		return {"applied": applied, "steam_restarted": true}
 	for game in games:
 		if args.is_empty() or game.appid != args[0]: continue

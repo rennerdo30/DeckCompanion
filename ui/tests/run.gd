@@ -79,6 +79,25 @@ func run() -> void:
 	root.add_child(ui)
 	await create_timer(0.5).timeout
 	check(ui.games.size() == 4,"main scene loads fixture library asynchronously")
+	# Steam Input's virtual gamepad on the Deck is not device 0.
+	for spec in [[JOY_BUTTON_A,"ui_accept"],[JOY_BUTTON_B,"ui_cancel"],[JOY_BUTTON_X,"dc_x"],[JOY_BUTTON_DPAD_DOWN,"ui_down"]]:
+		var press := InputEventJoypadButton.new()
+		press.device = 1
+		press.button_index = spec[0]
+		press.pressed = true
+		check(press.is_action(spec[1]),"gamepad device 1 button maps to " + spec[1])
+	var stick := InputEventJoypadMotion.new()
+	stick.device = 2
+	stick.axis = JOY_AXIS_LEFT_Y
+	stick.axis_value = 1.0
+	check(stick.is_action("ui_down"),"left stick on any device navigates")
+	var mock_backend = Backend.new()
+	mock_backend.mock = true
+	check(mock_backend.mock_response("default",["--on"]).pending.any(func(p): return p.get("action") == "default_on"),"default toggle stages a pending change")
+	check(Backend.parse_response(JSON.stringify(mock_backend.mock_response("status")),0,"default").has("version"),"default response validates as status")
+	mock_backend.mock_response("apply")
+	check(mock_backend.mock_response("status").default_tool,"apply commits default tool")
+	mock_backend.free()
 	check(ui.hints.get_global_rect().end.y <= root.size.y,"library hints fit viewport")
 	ui._input(InputEventKey.new())
 	var keyboard_event := InputEventKey.new()
