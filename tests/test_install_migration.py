@@ -73,7 +73,7 @@ def test_legacy_clone_preserved_install_running_and_uninstall_refused(paths, sou
     assert install.install(paths, source)["legacy_tool_preserved"] is True
     assert (compat / "DeckCompanion").read_text() == "old migration entry"
     monkeypatch.setattr(steam, "running", lambda: True)
-    assert install.install(paths, source)["steam_changes_pending"] is False
+    assert install.install(paths, source)["steam_changes_pending"] is True
     with pytest.raises(Error, match="Close Steam"):
         install.uninstall(paths)
 
@@ -141,9 +141,9 @@ def test_install_uninstall_cli_and_desktop_contract(paths, source, capsys):
     parser = configparser.ConfigParser(interpolation=None)
     parser.read(ROOT / "DeckCompanion-Installer.desktop")
     command = shlex.split(parser["Desktop Entry"]["Exec"])
-    assert command[:2] == ["sh", "-c"] and len(command) == 3
-    assert '--connect-timeout 2 --max-time 2' in command[2]
-    assert 'timeout 45s sh "$dc_tmp/install.sh"' in command[2]
+    assert command[:7] == ["konsole", "--hold", "-e", "bash", "-o", "pipefail", "-c"] and len(command) == 8
+    assert '--connect-timeout 10 --max-time 30' in command[7]
+    assert 'releases/latest/download/install.sh | timeout 300s sh' in command[7]
     assert 'git pull' not in (ROOT / "DeckCompanion").read_text().replace('never runs git pull', '')
 
 

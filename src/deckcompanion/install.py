@@ -5,9 +5,9 @@ from pathlib import Path
 import shutil
 import tempfile
 from . import __version__, content, localfix, net, steam, update
-from .common import Error, atomic, component, read_json, save_state, state, write_json
+from .common import Error, atomic, component, now, read_json, save_state, state, write_json
 
-PAYLOAD = ("src", "vdf", "recipes", "compat", "docs", "bin", "assets/logo", "LICENSE", "THIRD_PARTY_NOTICES.md",
+PAYLOAD = ("src", "vdf", "recipes", "compat", "docs", "bin", "assets/logo", "assets/steam", "LICENSE", "THIRD_PARTY_NOTICES.md",
            "compatibilitytool.vdf", "toolmanifest.vdf", "install.sh", "uninstall.sh", "DeckCompanion-Installer.desktop")
 
 
@@ -29,6 +29,11 @@ def install(paths, source):
         raise Error("no_root", "Run the installer as your normal user, without sudo")
     source = Path(source).resolve()
     version = component(__version__)
+    index = read_json(source / "index.json")
+    if index is not None:
+        update.validate_index(index)
+        if index["engine"]["version"] != version:
+            raise Error("version_mismatch", "Release index does not match the installing engine")
     inputs = files(source)
     if not {"src/deckcompanion/__main__.py", "vdf/__init__.py", "compat/DeckCompanion"} <= inputs.keys():
         raise Error("invalid_source", "Installer needs an extracted engine release or source checkout")
@@ -71,15 +76,20 @@ def install(paths, source):
     # Existing git-clone tools keep the migration shim and their tracked files intact.
     owned_write(paths.data / "bin/deckcompanion", stub.replace('main(["launch", *sys.argv[1:]])', 'main(sys.argv[1:])'), 0o755)
     has_ui = (source / "bin/deckcompanion-ui").is_file()
+    icon = next((p for p in (source / "assets/steam/icon.png", source / "assets/logo/deckcompanion-icon-256.png") if p.is_file()), None)
+    if icon:
+        owned_write(paths.data / "assets/icon.png", icon.read_bytes())
+    data = state(paths)
     if has_ui:
         ui_stub = stub[:stub.index("from deckcompanion.cli import main")] + 'os.execv(str(root / "bin/deckcompanion-ui"), [str(root / "bin/deckcompanion-ui"), *sys.argv[1:]])\n'
         owned_write(paths.data / "bin/deckcompanion-ui", ui_stub, 0o755)
         (target / "bin/deckcompanion-ui").chmod(0o755)
-        data = state(paths)
         data["shortcut_pending"] = True
-        save_state(paths, data)
-    data = state(paths)
-    pending = bool(data.get("shortcut_pending") or any(g.get("pending") for g in data["games"].values()))
+    data["default_pending"] = "default_on"
+    save_state(paths, data)
+    if index is not None:
+        write_json(paths.cache / "index.json", dict(index, fetched_at=now()))
+    pending = bool(data.get("default_pending") or data.get("shortcut_pending") or any(g.get("pending") for g in data["games"].values()))
     return {"installed": True, "version": version, "shortcut_pending": bool(data.get("shortcut_pending")),
             "steam_changes_pending": pending,
             "restart_required": True, "legacy_tool_preserved": legacy}
@@ -90,19 +100,28 @@ def uninstall(paths):
     data = state(paths)
     doc = steam.read_vdf(steam.mapping_path(paths))
     for ident, mapping in steam.mappings(doc).items():
-        if mapping.get("name") == "DeckCompanion" and ident.isdigit():
+        if mapping.get("name") == "DeckCompanion" and ident.isdigit() and ident != "0":
             data["games"].setdefault(ident, {})["pending"] = "disable"
     for item in data["games"].values():
         if item.get("pending") == "enable":
             item["pending"] = None
     data["shortcut_pending"] = False
+    data["default_pending"] = "default_off"
     save_state(paths, data)
     steam.apply(paths)
-    for file in (paths.steam / "userdata").glob("*/config/shortcuts.vdf"):
-        before = file.read_bytes()
-        after = steam.shortcut_bytes(paths, file, remove=True)
-        if before != after:
-            steam.guarded_write(file, after)
+    for config in (paths.steam / "userdata").glob("*/config"):
+        file = config / "shortcuts.vdf"
+        if file.exists():
+            before = file.read_bytes()
+            after = steam.shortcut_bytes(paths, file, remove=True)
+            if before != after:
+                steam.guarded_write(file, after)
+        ident = steam.shortcut_identity(paths)[1]
+        for suffix in steam.ARTWORK.values():
+            artwork = file.parent / "grid" / f"{ident}{suffix}.png"
+            if artwork.exists():
+                steam.require_closed()
+                artwork.unlink()
     for file in (paths.config / "localfixes").glob("[0-9]*.py"):
         if file.stem.isdigit():
             localfix.remove(paths, file.stem)

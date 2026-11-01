@@ -96,13 +96,37 @@ def installed(paths):
     return games
 
 
-def proton(paths):
-    candidates = list(paths.tools.glob("*/proton"))
-    candidates += [p for lib in libraries(paths) for p in (lib / "steamapps/common").glob("*/proton")]
+def proton(paths, log=lambda message: None):
+    # Broken library metadata must not hide the primary library or custom tools.
+    try:
+        roots = libraries(paths)
+    except Exception as exc:
+        log(f"Library discovery skipped: {exc}")
+        roots = [paths.steam]
+    found = {}
+    for root in [paths.tools, *(lib / "steamapps/common" for lib in roots)]:
+        try:
+            for script in root.glob("*/proton"):
+                folder = script.parent.resolve()
+                name = folder.name
+                if not script.is_file() or not re.match(r"^(GE-Proton|UMU-Proton|Proton(?:[ -]|\d))", name, re.I):
+                    continue
+                if "runtime" in name.lower() or name.lower() == "deckcompanion":
+                    continue
+                found[str(folder)] = {"name": name, "path": str(folder)}
+        except Exception as exc:
+            log(f"Proton discovery skipped {root}: {exc}")
+    def version(item):
+        return tuple(int(n) for n in re.findall(r"\d+", item["name"]))
+    valve_major = max((version(p)[0] for p in found.values()
+                       if p["name"].startswith("Proton ") and version(p)), default=0)
     def key(item):
-        return (item["name"].startswith("GE-Proton"), tuple(int(n) for n in re.findall(r"\d+", item["name"])), item["name"])
-    return sorted([{"name": p.parent.name, "path": str(p.parent)} for p in candidates
-                   if p.is_file() and p.parent.name != "DeckCompanion"], key=key, reverse=True)
+        name = item["name"]
+        numbers = (valve_major + 0.5,) if name == "Proton - Experimental" else version(item)
+        # Zero padding makes 10, 10.0 and 10.0.0 ties; GE wins equal versions.
+        return (numbers + (0,) * max(0, 8 - len(numbers)),
+                name.startswith(("GE-Proton", "Proton-GE")), name)
+    return sorted(found.values(), key=key, reverse=True)
 
 
 def mapping_path(paths):
@@ -134,23 +158,40 @@ def shortcut_path(paths):
     return paths.steam / "userdata" / user / "config/shortcuts.vdf"
 
 
+def shortcut_identity(paths):
+    exe = '"' + str(paths.data / "bin/deckcompanion-ui") + '"'
+    unsigned = zlib.crc32((exe + "DeckCompanion").encode()) | 0x80000000
+    return exe, unsigned
+
+
 def shortcut_bytes(paths, path, remove=False):
     doc = vdf.binary_loads(path.read_bytes()) if path.exists() else {"shortcuts": {}}
     entries = list(doc.setdefault("shortcuts", {}).values())
-    exe = '"' + str(paths.data / "bin/deckcompanion-ui") + '"'
-    unsigned = zlib.crc32((exe + "DeckCompanion").encode()) | 0x80000000
+    exe, unsigned = shortcut_identity(paths)
     ident = unsigned - 0x100000000  # Steam interprets the signed VDF int32 bits as uint32.
     entries = [e for e in entries if not (e.get("appid") == ident and e.get("Exe") == exe)]
     if not remove:
-        from . import update
-        version = update.current(paths)
-        icon = paths.data / "versions" / version / "assets/logo/deckcompanion-icon-256.png" if version else None
+        icon = paths.data / "assets/icon.png"
         entries.append({"appid": ident, "AppName": "DeckCompanion", "Exe": exe,
                         "StartDir": '"' + str(paths.data / "bin") + '"',
-                        "icon": str(icon) if icon and icon.is_file() else "", "LaunchOptions": "",
+                        "icon": str(icon) if icon.is_file() else "", "LaunchOptions": "",
                         "IsHidden": 0, "AllowDesktopConfig": 1, "AllowOverlay": 1, "tags": {}})
     doc["shortcuts"] = {str(i): item for i, item in enumerate(entries)}
     return vdf.binary_dumps(doc)
+
+
+ARTWORK = {"portrait": "p", "wide": "", "hero": "_hero", "logo": "_logo", "icon": "_icon"}
+
+
+def shortcut_artwork(paths, path):
+    from . import update
+    version = update.current(paths)
+    if not version:
+        return []
+    ident = shortcut_identity(paths)[1]
+    source = paths.data / "versions" / version / "assets/steam"
+    return [(path.parent / "grid" / f"{ident}{suffix}.png", (source / f"{name}.png").read_bytes())
+            for name, suffix in ARTWORK.items() if (source / f"{name}.png").is_file()]
 
 
 def guarded_write(path, payload):
@@ -177,6 +218,20 @@ def apply(paths, restart=False):
     doc = read_vdf(mapping_path(paths))
     target = mappings(doc)
     changes, cleanup = [], []
+    pending = data.get("default_pending")
+    if pending:
+        if pending == "default_on":
+            if target.get("0", {}).get("name") != "DeckCompanion":
+                data["previous_default_mapping"] = target.get("0")
+            target["0"] = {"name": "DeckCompanion", "config": "", "priority": "250"}
+        elif target.get("0", {}).get("name") == "DeckCompanion":
+            previous = data.get("previous_default_mapping")
+            if previous is None:
+                target.pop("0", None)
+            else:
+                target["0"] = previous
+        data["default_pending"] = None
+        changes.append({"action": pending})
     for ident, game in data["games"].items():
         pending = game.get("pending")
         if not pending:
@@ -201,6 +256,7 @@ def apply(paths, restart=False):
     if data.get("shortcut_pending"):
         path = shortcut_path(paths)
         writes.append((path, shortcut_bytes(paths, path)))
+        writes.extend(shortcut_artwork(paths, path))
         data["shortcut_pending"] = False
         changes.append({"action": "shortcut"})
     originals = {p: p.read_bytes() if p.exists() else None for p, _ in writes}

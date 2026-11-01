@@ -15,7 +15,7 @@ def test_discovery_across_libraries(paths, tmp_path):
     for name in ("GE-Proton9-9", "GE-Proton11-11", "GE-Proton11-2"):
         atomic(paths.tools / name / "proton", "fake")
     atomic(other / "steamapps/common/Proton 10.0/proton", "fake")
-    assert [p["name"] for p in steam.proton(paths)] == ["GE-Proton11-11", "GE-Proton11-2", "GE-Proton9-9", "Proton 10.0"]
+    assert [p["name"] for p in steam.proton(paths)] == ["GE-Proton11-11", "GE-Proton11-2", "Proton 10.0", "GE-Proton9-9"]
 
 
 def invoke(capsys, *args):
@@ -124,7 +124,7 @@ def test_cli_shapes_and_errors(paths, monkeypatch, capsys):
     assert isinstance(detail["log_tail"], list) and len(detail["log_tail"]) == 200
     assert detail["log_tail"][0] == "30"
     assert "notes" in detail
-    assert set(invoke(capsys, "status")[1]) == {"version", "steam_running", "pending", "proton", "last_apply"}
+    assert set(invoke(capsys, "status")[1]) == {"version", "steam_running", "default_tool", "pending", "proton", "last_apply"}
     assert invoke(capsys, "status")[1]["last_apply"] is None
     code, error = invoke(capsys, "enable", "../bad")
     assert code == 1 and error["error"]["code"] == "invalid_appid"

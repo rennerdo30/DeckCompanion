@@ -34,8 +34,17 @@ SHA256. Repeated runtime pins share one API response. `--offline` builds a
 development bundle with unresolved source mods (visible but not installable).
 The engine archive bundles baseline recipes; the resolved index is activated by
 `update`. Nothing publishes. If `bin/deckcompanion-ui` is present, it is included;
-`assets/logo/` is included when present too, including the optional 256px PNG used
-by the installed non-Steam shortcut. Install queues the shortcut while Steam runs;
+`assets/logo/` and `assets/steam/` are included when present. The latter supplies
+portrait/wide/hero/logo/icon PNGs for Steam's grid. Install refreshes a stable
+`assets/icon.png` under the data root, independent of engine version directories.
+`install.sh` and `DeckCompanion-Installer.desktop` are also emitted separately
+beside the tarball, index and checksums for upload as release assets. The standalone
+installer fetches `releases/latest/download/index.json`, then the index's HTTPS
+engine asset URL, verifies SHA256 before extraction, and caches the validated
+index during install. Downloads and subprocesses are bounded. It supports piped
+stdin without prompts and applies through the installed CLI so a detached helper
+outlives temporary extraction cleanup. The desktop asset opens Konsole and runs
+the same pipe with timeouts. Install queues the shortcut while Steam runs;
 only apply writes Steam VDF files. See the [CLI lifecycle](cli.md).
 The builder never reads or modifies the sibling's `ui/` tree.
 

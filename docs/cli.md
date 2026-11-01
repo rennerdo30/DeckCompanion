@@ -18,15 +18,23 @@ contract too. `--help` is the human help exception. No progress messages on stdo
   recipes, and games with saved state. IDs are strings. No network requests.
 - `game APPID --json` -> GAME plus `notes` (string) and `log_tail` (array of strings, last 200 lines, newlines stripped).
 - `enable APPID --json` / `disable APPID --json` -> GAME. Queues a change; does not write Steam files.
+- `default --on|--off --json` -> the same object as `status`. Queues setting or
+  restoring global `CompatToolMapping` key `"0"`; Steam files stay unchanged until
+  `apply`. Install queues `default_on` automatically. The previous complete entry
+  is saved at apply time and restored by off/uninstall only while ours is selected.
 - `mod APPID MOD_ID --on|--off --json` -> GAME. Saves preference immediately; content reconciles at launch.
 - `apply [--restart-steam] --json` -> `{"applied":[{"appid":"2300320","action":"enable"}],"steam_restarted":true}`.
+  Global default changes have `{"action":"default_on"}` or `{"action":"default_off"}`.
   Installer shortcut changes have `{"action":"shortcut"}`. Without restart, Steam must already
   be closed. On Linux with Steam running, restart hands off and returns immediately:
   `{"applied":[],"scheduled":true,"steam_restarted":false,"helper":"deckcompanion-apply-<timestamp>"}`.
   The UI can show **Steam will restart now**. Scheduling does not confirm writes succeeded.
   Windows/dev retains in-process shutdown, a 10-second wait and Steam startup.
   Writes recheck Steam and back up originals. Never kill detected Steam processes.
-- `status --json` -> `{"version":"0.2.0","steam_running":false,"pending":[],"proton":[{"name":"GE-Proton11-11","path":"..."}],"last_apply":null}`.
+- `status --json` -> `{"version":"0.3.0","steam_running":false,"default_tool":false,"pending":[],"proton":[{"name":"GE-Proton11-11","path":"..."}],"last_apply":null}`.
+  `default_tool` reflects the current on-disk global mapping, even while a change
+  is queued. `pending` retains game entries and adds `{"action":"default_on"}`
+  or `{"action":"default_off"}` without an appid for a queued global change.
   `last_apply` is null before a helper run, then the content of `logs/apply-last.json`.
 
 ## Detached Linux apply
@@ -99,6 +107,21 @@ game, including `--json`. Runtime env and launch options come from the recipe.
 
 `last_launch.ok` means preparation/handoff succeeded, not that the game ran or
 exited successfully. The engine cannot observe the result after `execve`.
+A game without a recipe uses the newest installed Proton by parsed numeric version,
+including GE-Proton/UMU-Proton under `compatibilitytools.d` and Valve Proton from
+all Steam libraries. A `proton` script must exist. Runtime/DeckCompanion/other
+non-Proton folders are excluded. Symlink aliases resolve to one target.
+`GE-Proton11-11` ranks as (11,11), `UMU-Proton-10.0-4` as (10,0,4),
+`Proton 10.0` as (10,0). Experimental ranks as the newest installed Valve major
+plus 0.5; GE wins ties. Recipe pins retain their download/installed fallback
+(prefer installed GE, otherwise the newest available Proton).
+The selected runtime is logged.
+
+Corrupt state/recipes and exceptions during recipe/runtime/content/localfix/state
+preparation log a warning and still hand off to the selected or newest installed
+Proton with the original game arguments and environment. Logging failures fall
+back to stderr. A corrupt state file is preserved. With no Proton available,
+launch exits with `no_proton` and a clear log message.
 Missing/corrupt optional content logs a warning and uses installed content. All
 launch network requests share a two-second wall budget, implemented in an owned
 worker subprocess so DNS and slow bodies are bounded too. No index/latest API
@@ -116,7 +139,7 @@ the same message; game listing shapes remain unchanged.
 
 ## Update and rollback (slice 3a)
 
-`update --json` -> `{"engine":{"current":"0.2.0","available":"0.2.0","updated":false},"index":{"updated":false,"fetched_at":null}}`.
+`update --json` -> `{"engine":{"current":"0.3.0","available":"0.3.0","updated":false},"index":{"updated":false,"fetched_at":null}}`.
 `fetched_at` is an ISO8601 string after the first successful fetch; null if none.
 Offline operation uses the cache. A cached release can still install offline.
 `rollback --json` -> `{"version":"0.1.0","rolled_back":true}`; no previous version
@@ -125,16 +148,24 @@ is an error. See [updates.md](updates.md) for integrity, cache and signing limit
 ## Installer commands (slice 3)
 
 `install [--source EXTRACTED_RELEASE] --json` ->
-`{"installed":true,"version":"0.2.0","shortcut_pending":true,"steam_changes_pending":true,"restart_required":true,"legacy_tool_preserved":false}`.
+`{"installed":true,"version":"0.3.0","shortcut_pending":true,"steam_changes_pending":true,"restart_required":true,"legacy_tool_preserved":false}`.
 Engine versions, compat tool, bin stubs and UI/assets install while Steam is running.
 Only Steam VDF writes (shortcut and queued mappings) wait for `apply` with Steam closed.
-`steam_changes_pending` includes both mappings and the shortcut; it can be false for
-an engine-only install without queued changes. Installs no packages and changes no
+`steam_changes_pending` includes default/game mappings and the shortcut. Install
+always queues the global default, including engine-only releases. Installs no packages and changes no
 persistent environment.
 The source defaults to the current engine/checkout root. UI shortcut is queued
 only if the release contains `bin/deckcompanion-ui`. `apply` chooses the Steam user.
-If bundled, `assets/logo/deckcompanion-icon-256.png` supplies the shortcut's installed
-icon path. The SVG alone is retained as an asset but is not used as a Steam icon.
+`assets/steam/icon.png` (or the legacy `assets/logo/deckcompanion-icon-256.png`)
+is refreshed to the stable `assets/icon.png` under the data root for the shortcut.
+When writing the shortcut, available `assets/steam/{portrait,wide,hero,logo,icon}.png`
+are copied to the selected account's `config/grid/`, using the unsigned 32-bit
+shortcut appid: `<appid>p.png`, `<appid>.png`, `<appid>_hero.png`,
+`<appid>_logo.png`, `<appid>_icon.png`. Missing images are skipped. Expected source
+sizes are portrait 600x900, wide 920x430 and hero 1920x620; the parent supplies art.
+Uninstall removes these shortcut images across accounts. The SVG remains an asset.
+The standalone/piped installer applies automatically through the installed CLI;
+while Steam runs it schedules the detached helper without waiting for shutdown.
 
 `uninstall --json` -> `{"uninstalled":true,"preserved":[],"steam_restart_required":true}`.
 It requires Steam closed, restores prior mappings, and preserves user changes and

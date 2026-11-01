@@ -289,7 +289,7 @@ def test_install_running_queues_files_and_png_icon(paths, tmp_path, monkeypatch)
     monkeypatch.setattr(steam, "running", lambda: False)
     steam.apply(paths)
     shortcut = vdf.binary_loads(steam.shortcut_path(paths).read_bytes())["shortcuts"]["0"]
-    icon = paths.data / "versions" / __version__ / "assets/logo/deckcompanion-icon-256.png"
+    icon = paths.data / "assets/icon.png"
     assert shortcut["icon"] == str(icon) and icon.read_bytes() == b"mock payload"
 
 

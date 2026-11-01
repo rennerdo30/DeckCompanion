@@ -32,13 +32,14 @@ def parser():
     root = Parser(prog="deckcompanion")
     root.add_argument("--json", action="store_true")
     commands = root.add_subparsers(dest="command", required=True)
-    for name in ("games", "game", "enable", "disable", "mod", "apply", "status", "update", "rollback"):
+    for name in ("games", "game", "enable", "disable", "mod", "default", "apply", "status", "update", "rollback"):
         sub = commands.add_parser(name)
         sub.add_argument("--json", action="store_true")
         if name in ("game", "enable", "disable", "mod"):
             sub.add_argument("appid", type=app_id)
         if name == "mod":
             sub.add_argument("mod_id")
+        if name in ("mod", "default"):
             group = sub.add_mutually_exclusive_group(required=True)
             group.add_argument("--on", action="store_true")
             group.add_argument("--off", action="store_true")
@@ -98,9 +99,16 @@ def execute(args, paths):
         return game(paths, args.appid)
     if name == "apply":
         return steam.apply(paths, args.restart_steam)
-    if name == "status":
+    if name == "default":
+        data["default_pending"] = "default_on" if args.on else "default_off"
+        save_state(paths, data)
+    if name in ("status", "default"):
+        pending = [{"appid": ident, "action": item["pending"]} for ident, item in data["games"].items() if item.get("pending")]
+        if data.get("default_pending"):
+            pending.append({"action": data["default_pending"]})
         return {"version": __version__, "steam_running": steam.running(),
-                "pending": [{"appid": ident, "action": item["pending"]} for ident, item in data["games"].items() if item.get("pending")],
+                "default_tool": steam.mappings(steam.read_vdf(steam.mapping_path(paths))).get("0", {}).get("name") == "DeckCompanion",
+                "pending": pending,
                 "proton": steam.proton(paths),
                 "last_apply": read_json(paths.data / "logs/apply-last.json")}
     raise Error("unknown_command", name)

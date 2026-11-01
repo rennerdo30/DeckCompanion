@@ -100,6 +100,9 @@ def build(output, version=__version__, offline=False):
             logo = ROOT / "assets/logo"
             if logo.is_dir():
                 tar.add(logo, arcname="assets/logo", filter=include)
+            artwork = ROOT / "assets/steam"
+            if artwork.is_dir():
+                tar.add(artwork, arcname="assets/steam", filter=include)
         sha = net.digest(archive)
         index = {"schema_version": 1, "engine": {"version": version, "url": base + archive.name, "sha256": sha}, "recipes": entries}
         write_json(output / "index.json", index)

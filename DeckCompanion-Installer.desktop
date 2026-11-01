@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
 Name=Install DeckCompanion
-Comment=Install DeckCompanion in your home directory (close Steam first)
-Terminal=true
+Comment=Install DeckCompanion in your home directory and restart Steam
+Terminal=false
 Icon=system-software-install
-Exec=sh -c "dc_tmp=$(mktemp -d -t deckcompanion.XXXXXXXX) && trap 'rm -rf -- \"$dc_tmp\"' EXIT && curl --fail --location --proto '=https' --proto-redir '=https' --connect-timeout 2 --max-time 2 --output \"$dc_tmp/install.sh\" https://github.com/rennerdo30/DeckCompanion/releases/latest/download/install.sh && timeout 45s sh \"$dc_tmp/install.sh\""
+Exec=konsole --hold -e bash -o pipefail -c "curl -fsSL --proto =https --proto-redir =https --connect-timeout 10 --max-time 30 https://github.com/rennerdo30/DeckCompanion/releases/latest/download/install.sh | timeout 300s sh"
 Categories=Utility;
