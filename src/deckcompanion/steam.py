@@ -93,13 +93,20 @@ def proton_running(target, proc_root=Path("/proc")):
             try:
                 if hasattr(os, "getuid") and process.stat().st_uid != os.getuid():
                     continue
-                # Open file/executable paths survive even if a game's preferences changed.
-                if (process / "exe").is_symlink() and (process / "exe").resolve().is_relative_to(target):
-                    return True
+                # Same-user but undumpable processes (gamescope, sandbox helpers) hide exe and
+                # environ on the Deck; their cmdline stays readable (hardware check 2026-11-01).
+                try:
+                    if (process / "exe").is_symlink() and (process / "exe").resolve().is_relative_to(target):
+                        return True
+                except PermissionError:
+                    pass
                 args = (process / "cmdline").read_bytes().split(b"\0")
                 if any(within(arg) for arg in args if arg):
                     return True
-                env = (process / "environ").read_bytes().split(b"\0")
+                try:
+                    env = (process / "environ").read_bytes().split(b"\0")
+                except PermissionError:
+                    continue
                 for entry in env:
                     key, _, value = entry.partition(b"=")
                     if key in (b"PROTONPATH", b"WINELOADER", b"WINESERVER", b"WINEDLLPATH",

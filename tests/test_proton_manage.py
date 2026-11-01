@@ -253,3 +253,27 @@ def test_automatic_cleanup_preserves_explicit_game_override(paths, monkeypatch):
     monkeypatch.setattr(steam, "running", lambda: False)
     assert proton.cleanup(paths, set()) == []
     assert root.is_dir()
+
+
+def test_proton_running_skips_processes_hiding_exe_and_environ(tmp_path, monkeypatch):
+    # On the Deck gamescope and sandbox helpers hide exe/environ; that must not block removal.
+    from pathlib import Path as _Path
+    real_detector = steam.__dict__["proton_running"]
+    target = tmp_path / "tools" / "GE-Proton11-7"
+    (target / "files").mkdir(parents=True)
+    proc = tmp_path / "proc"
+    hidden, user = proc / "100", proc / "200"
+    for process in (hidden, user):
+        process.mkdir(parents=True)
+        (process / "environ").write_bytes(b"")
+    (hidden / "cmdline").write_bytes(b"gamescope-wl\0")
+    (user / "cmdline").write_bytes(b"other\0")
+    real = _Path.read_bytes
+    def read_bytes(self):
+        if self == hidden / "environ":
+            raise PermissionError("undumpable")
+        return real(self)
+    monkeypatch.setattr(_Path, "read_bytes", read_bytes)
+    assert real_detector(target, proc) is False
+    (user / "cmdline").write_bytes(str(target / "files" / "bin" / "wine").encode() + b"\0")
+    assert real_detector(target, proc) is True
