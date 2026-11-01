@@ -125,7 +125,7 @@ def test_cli_shapes_and_errors(paths, monkeypatch, capsys):
     assert isinstance(detail["log_tail"], list) and len(detail["log_tail"]) == 200
     assert detail["log_tail"][0] == "30"
     assert "notes" in detail
-    assert set(invoke(capsys, "status")[1]) == {"version", "install_path", "steam_running", "default_tool", "pending", "proton", "last_apply",
+    assert set(invoke(capsys, "status")[1]) == {"version", "install_path", "steam_running", "default_tool", "pending", "proton", "last_apply", "channels",
                                                "takeover_all", "takeover_counts", "takeover_snapshot"}
     assert invoke(capsys, "status")[1]["last_apply"] is None
     code, error = invoke(capsys, "enable", "../bad")
