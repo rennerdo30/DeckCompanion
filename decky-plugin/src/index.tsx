@@ -44,7 +44,7 @@ function Content() {
   useEffect(() => {
     alive.current = true;
     void refresh();
-    const timer = setInterval(() => void refresh(), 5000);
+    const timer = setInterval(() => void refresh(), 10000);
     return () => { alive.current = false; clearInterval(timer); };
   }, []);
 
@@ -64,73 +64,68 @@ function Content() {
   const protonChoice = game?.options?.proton ?? game?.kind !== "non_steam";
   const routingChoice = game?.options?.takeover ?? game?.kind !== "non_steam";
   const routing = game?.pending ? game.pending === "enable" : !!game?.enabled;
-  const options = [{ data: "auto", label: "Automatic" },
+  const current = game?.proton?.name;
+  const options = [{ data: "auto", label: current && !game?.proton_override ? `Automatic (${current})` : "Automatic" },
     ...(snapshot?.proton ?? []).map(p => ({ data: p.name, label: p.name }))];
   if (game?.proton_override && !options.some(o => o.data === game.proton_override)) {
     options.push({ data: game.proton_override, label: `${game.proton_override} (missing)` });
   }
+  function openApp() {
+    if (!snapshot?.shortcut_appid) return;
+    SteamClient.Apps.RunGame(snapshot.shortcut_appid, "", 0, 200); // Steam's _10ft launch source.
+    Navigation.CloseSideMenus();
+  }
+  const playing = ["current", "running"].includes(snapshot?.selection ?? "");
+  const summary = game ? [game.proton ? `${game.proton.name} · ${REASONS[game.proton.reason] ?? game.proton.reason}` : "No Proton installed",
+    game.has_recipe ? "recipe" : ""].filter(Boolean).join(" · ") : "";
 
-  return <div className="deckcompanion-qam" style={{ fontSize: 19, lineHeight: 1.4, overflowWrap: "anywhere" }}>
-    <style>{`
-      .deckcompanion-qam [class*="Label"], .deckcompanion-qam [class*="Description"],
-      .deckcompanion-qam [class*="Button"] { font-size: 19px; white-space: normal; }
-      .deckcompanion-qam button, .deckcompanion-qam [role="button"],
-      .deckcompanion-qam [role="switch"] { min-height: 40px; }
-      .deckcompanion-qam .gpfocus, .deckcompanion-qam :focus-visible {
-        outline: 2px solid #8ce0c1; outline-offset: 2px;
-      }
-    `}</style>
-    <PanelSection>
-      {error && <PanelSectionRow><div role="alert">{error}</div></PanelSectionRow>}
-      <PanelSectionRow><ButtonItem layout="below" disabled={busy || !snapshot?.shortcut_appid}
-        onClick={() => {
-          if (snapshot?.shortcut_appid) {
-            SteamClient.Apps.RunGame(snapshot.shortcut_appid, "", 0, 200); // Steam's _10ft launch source.
-            Navigation.CloseSideMenus();
-          }
-        }}>Open DeckCompanion</ButtonItem></PanelSectionRow>
-      {snapshot && !snapshot.shortcut_appid && <PanelSectionRow>
-        <div>Install the full app and Apply once to add its Steam shortcut.</div>
-      </PanelSectionRow>}
-      <PanelSectionRow><ButtonItem layout="below" disabled={busy} onClick={() => void refresh()}>
-        Refresh
-      </ButtonItem></PanelSectionRow>
-    </PanelSection>
-    {game ? <PanelSection>
+  // Decky's own text sizes: the Quick Access menu is narrow, so no size overrides here.
+  return <div style={{ overflowWrap: "anywhere" }}>
+    {error && <PanelSection><PanelSectionRow><div role="alert" style={{ color: "#ffb38a" }}>{error}</div></PanelSectionRow></PanelSection>}
+    {game ? <PanelSection title={playing ? "Playing now" : "Last played"}>
       <PanelSectionRow><div>
-        <div style={{ fontSize: 20, fontWeight: 600 }}>{game.name}</div>
-        <div>{["current", "running"].includes(snapshot!.selection) ? "Running game" : "Last game"}</div>
-        <div>{game.has_recipe ? `Recipe ${game.recipe_version ?? "available"}` : "No recipe; automatic Proton"}</div>
-        <div>{game.proton ? `${game.proton.name} · ${game.proton.reason}` : "No installed Proton"}</div>
-        <div>{game.last_launch ? `Last launch: ${new Date(game.last_launch.time).toLocaleString()} · ${game.last_launch.ok ? "handed off" : "failed"}` : "No DeckCompanion launch yet"}</div>
+        <div style={{ fontWeight: 600 }}>{game.name}</div>
+        <div style={MUTED}>{summary}</div>
       </div></PanelSectionRow>
-      <PanelSectionRow><ToggleField label="Run through DeckCompanion" checked={routing}
-        disabled={busy || !routingChoice} onChange={value => void update("routing", value)} /></PanelSectionRow>
-      {game.pending && <PanelSectionRow><div>Queued: {game.pending}. Open DeckCompanion and Apply when ready.</div></PanelSectionRow>}
-      <PanelSectionRow><DropdownItem label="Proton" layout="below" rgOptions={options}
-        selectedOption={game.proton_override ?? "auto"} disabled={busy || !protonChoice}
-        onChange={value => void update("proton", value.data)} /></PanelSectionRow>
-      {game.kind === "non_steam" && (!protonChoice || !routingChoice) && <PanelSectionRow>
-        <div>Non-Steam games already run through DeckCompanion. Proton is chosen automatically (newest GE); per-game choice comes later.</div>
-      </PanelSectionRow>}
+      <PanelSectionRow><ToggleField label="Use DeckCompanion" description="Fixes, mods and the right Proton for this game"
+        checked={routing} disabled={busy || !routingChoice} onChange={value => void update("routing", value)} /></PanelSectionRow>
+      {protonChoice && <PanelSectionRow><DropdownItem label="Proton" rgOptions={options}
+        selectedOption={game.proton_override ?? "auto"} disabled={busy}
+        onChange={value => void update("proton", value.data)} /></PanelSectionRow>}
       {game.mods.map(mod => <PanelSectionRow key={mod.id}>
-        <ToggleField label={mod.name} description={`${mod.state}: ${mod.state_message}`}
+        <ToggleField label={mod.name} description={MOD_STATES[mod.state] ?? mod.state_message}
           checked={mod.enabled} disabled={busy} onChange={enabled => void update("mod", { id: mod.id, enabled })} />
       </PanelSectionRow>)}
-      {!game.mods.length && <PanelSectionRow><div>No mods in this recipe.</div></PanelSectionRow>}
+      {game.pending && <PanelSectionRow><div style={MUTED}>Takes effect after you apply it in DeckCompanion (Steam restarts once).</div></PanelSectionRow>}
+      {game.pending && snapshot?.shortcut_appid && <PanelSectionRow>
+        <ButtonItem layout="below" disabled={busy} onClick={openApp}>Apply in DeckCompanion</ButtonItem>
+      </PanelSectionRow>}
     </PanelSection> : <PanelSection><PanelSectionRow>
-      <div>{snapshot ? "Launch a game to see its setup here." : "Loading game setup…"}</div>
+      <div style={MUTED}>{snapshot ? "Play a game and its DeckCompanion setup shows up here." : "Loading…"}</div>
     </PanelSectionRow></PanelSection>}
-    {snapshot && <PanelSection><PanelSectionRow>
-      <ToggleField label="Launch splash" description="Applies to all games" checked={snapshot.settings.splash}
-        disabled={busy} onChange={value => void update("splash", value)} />
-    </PanelSectionRow></PanelSection>}
+    {snapshot && <PanelSection title="All games">
+      <PanelSectionRow><ToggleField label="Launch splash" description="Shows Proton, fixes and mods when a game starts"
+        checked={snapshot.settings.splash} disabled={busy} onChange={value => void update("splash", value)} /></PanelSectionRow>
+      {!(game?.pending) && <PanelSectionRow><ButtonItem layout="below" disabled={!snapshot.shortcut_appid} onClick={openApp}>
+        Open DeckCompanion</ButtonItem></PanelSectionRow>}
+      {!snapshot.shortcut_appid && <PanelSectionRow><div style={MUTED}>Open DeckCompanion from your library once to add it here.</div></PanelSectionRow>}
+    </PanelSection>}
   </div>;
 }
 
+const MUTED = { color: "#8b929a", fontSize: "0.9em" };
+const REASONS: Record<string, string> = {
+  pinned: "recipe pin", recipe_fallback: "recipe fallback", newest: "newest installed",
+  valve_recommended: "Valve's pick", user_override: "your choice", community_fix: "community fix"
+};
+const MOD_STATES: Record<string, string> = {
+  installed: "Installed", will_install_on_launch: "Installs on next launch",
+  update_available: "Update available", off: "Off"
+};
+
 export default definePlugin(() => ({
   name: "DeckCompanion",
-  titleView: <div className={staticClasses.Title} style={{ fontSize: 20 }}>DeckCompanion</div>,
+  titleView: <div className={staticClasses.Title}>DeckCompanion</div>,
   content: <Content />,
   // Sized like Decky's other icons (1em); without a size the SVG fills the whole tab.
   icon: <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
