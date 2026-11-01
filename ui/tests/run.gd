@@ -89,6 +89,19 @@ func run() -> void:
 	# Startup reads games, status and persisted splash settings sequentially.
 	await create_timer(0.7).timeout
 	check(ui.games.size() == 4,"main scene loads fixture library asynchronously")
+	# Update notifications (owner): background changes are announced once; Decky/plugin updates show in the corner.
+	for i in 20:
+		if not ui.updates_info.is_empty(): break
+		await create_timer(0.1).timeout
+	check(ui.status_chip.text.contains("Apply"),"pending changes still come first in the corner chip")
+	var saved_pending: Array = ui.status.get("pending",[])
+	ui.status["pending"] = []
+	ui._update_status_chip()
+	check(ui.updates_info.get("available",[]).size() == 2 and ui.status_chip.text.contains("2 updates") and not ui.status_chip.disabled,"corner chip announces Decky plugin updates when nothing else waits")
+	ui.status["pending"] = saved_pending
+	ui._update_status_chip()
+	await create_timer(0.4).timeout
+	check(ui.updates_backend.mock_updates_seen,"background changes are marked seen after they were announced")
 	await ui_032(ui)
 	await ui_034(ui)
 	await settings_checks(ui)
@@ -399,6 +412,17 @@ func settings_checks(ui: Node) -> void:
 	await create_timer(0.8).timeout
 	check(ui.decky_status.get("password_set") == true and ui.notice.contains("installed") and ui.notice.contains("Steam restarts"),"password set, then Decky installs and Steam restarts, all in the app")
 	check(ui.decky_pending_password.is_empty() and ui.decky_fields[0].text.is_empty(),"the password is not kept in memory or in the fields afterwards")
+	# Plugin updates use the same in-app password flow (owner: update plugins together with Decky).
+	ui.decky_status["password_set"] = true
+	ui._confirm_decky_plugins()
+	await create_timer(0.2).timeout
+	check(ui.decky_dialog.visible and ui.decky_dialog.get_meta("heading").text == "Update Decky plugins" and not ui.decky_fields[1].visible,"plugin update asks for the Deck password once in the app")
+	ui.decky_fields[0].text = "deck1234"
+	ui.decky_dialog.confirmed.emit()
+	ui.decky_dialog.hide()
+	await create_timer(0.8).timeout
+	check(ui.notice.contains("updated ProtonDB Badges") and ui.notice.contains("SteamGridDB could not be updated") and ui.notice.contains("Steam restarts"),"plugin results name what updated and what failed")
+	check(ui.decky_pending_password.is_empty(),"plugin update does not keep the password")
 	control(ui,"plugin_install").pressed.emit()
 	await create_timer(0.6).timeout
 	check(ui.notice.contains("plugin installed") and control(ui,"plugin_install") == null,"plugin installs independently and the button disappears when current")

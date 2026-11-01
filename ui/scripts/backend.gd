@@ -10,6 +10,8 @@ var restore_pending := false
 var launcher_ticks := 0
 var mock_plugin := false
 var mock_password_set := false
+var mock_updates_seen := false
+var mock_plugins_updated := false
 var mock_launchers: Array = [
 	{"id":"epic","name":"Epic Games Launcher","store":"egs","state":"not_installed","installed":false,"unattended":true,"warnings":[],"job":null},
 	{"id":"gog","name":"GOG Galaxy","store":"gog","state":"installed","installed":true,"unattended":false,"warnings":[],"job":null},
@@ -84,7 +86,8 @@ static func parse_response(raw: String, exit_code: int, command: String) -> Dict
 		"update": valid = data.get("scheduled",false) or (data.get("engine") is Dictionary and data.get("index") is Dictionary and data.engine.get("current") is String and data.engine.get("available") is String and (data.index.get("fetched_at") is String or data.index.get("fetched_at") == null))
 		"apply": valid = data.get("applied") is Array and data.get("steam_restarted") is bool
 		"launchers": valid = data.get("launchers") is Array
-		"decky": valid = data.has("installed") or data.has("needs_desktop") or data.has("can_install") or data.has("changed") or data.has("password_set") or data.has("steam_restarting")
+		"updates": valid = data.get("changed") is Array and data.get("available") is Array
+		"decky": valid = data.has("plugins_updated") or data.has("installed") or data.has("needs_desktop") or data.has("can_install") or data.has("changed") or data.has("password_set") or data.has("steam_restarting")
 		"launcher": valid = data.get("launcher") is Dictionary or data.has("removed")
 		"restore-all": valid = (data.get("restoring") is int or data.get("restoring") is float) and data.get("pending") is Array
 		"add-game": valid = valid_game(data) and data.get("kind") == "non_steam" and data.get("slug") is String
@@ -205,12 +208,20 @@ func mock_response(command: String, args: Array = []) -> Dictionary:
 	if scenario == "offline" and command == "update": return fixture("offline")
 	if command == "games": return {"games": [] if scenario == "empty" else games.duplicate(true)}
 	if command == "update": return fixture("update")
+	if command == "updates":
+		var result := {"changed": [] if mock_updates_seen else [{"module":"recipes","name":"Recipes","from":"2026.10.30","to":"2026.11.02","at":"2026-11-02T00:10:00Z"},{"module":"umu","name":"umu-launcher","from":"1.4.4","to":"1.4.5","at":"2026-11-02T00:10:05Z"}],
+			"available": [] if mock_plugins_updated else [{"module":"decky-plugins","name":"ProtonDB Badges","installed":"1.2.0","latest":"1.3.4"},{"module":"decky-plugins","name":"SteamGridDB","installed":"1.7.1","latest":"1.8.1"}]}
+		if "--seen" in args: mock_updates_seen = true
+		return result
 	if command == "decky":
 		# Like the engine, consume the password file at once.
 		var secret := args.find("--password-file")
 		if secret >= 0 and secret + 1 < args.size(): DirAccess.remove_absolute(args[secret + 1])
 		match args[0]:
-			"status": return {"installed": true, "version": "v3.2.8", "service": "active", "password_set": mock_password_set, "latest": {"version": "v3.3.1", "source": "github", "stale": false}}
+			"update-plugins":
+				mock_plugins_updated = true
+				return {"plugins_updated": ["ProtonDB Badges"], "plugins_failed": [{"name": "SteamGridDB", "error": "checksum_mismatch"}], "steam_restarting": true}
+			"status": return {"installed": true, "version": "v3.2.8", "service": "active", "password_set": mock_password_set, "plugins": [] if mock_plugins_updated else [{"dir":"protondb-decky","name":"ProtonDB Badges","installed":"1.2.0","latest":"1.3.4","update_available":true},{"dir":"decky-steamgriddb","name":"SteamGridDB","installed":"1.7.1","latest":"1.8.1","update_available":true}], "latest": {"version": "v3.3.1", "source": "github", "stale": false}}
 			"set-password":
 				mock_password_set = true
 				return {"password_set": true}

@@ -20,6 +20,9 @@ var decky_handoff: Dictionary = {}
 var decky_dialog: ConfirmationDialog
 var dim: ColorRect
 var decky_fields: Array = []
+var decky_action := "install"
+var updates_backend: Node
+var updates_info: Dictionary = {}
 var keyboard_requests := 0
 var keyboard_opened_ms := -10000
 var decky_error: Label
@@ -29,7 +32,7 @@ var decky_pending_repeat := ""
 var launcher_backend: Node
 var launchers_data: Array = []
 var launcher_poll := 0.0
-const UI_VERSION := "0.4.8"
+const UI_VERSION := "0.4.9"
 # Design tokens (shared with the logo and Steam artwork palette).
 var INK: Color = Color("e7f1f4")
 var MUTED: Color = Color("8fa6b2")
@@ -112,6 +115,9 @@ func _ready() -> void:
 	proton_backend.completed.connect(_proton_completed)
 	# The list contract does not include notes on older engines. Read detail separately
 	# without locking navigation or rebuilding the panel while focus moves.
+	updates_backend = Backend.new()
+	add_child(updates_backend)
+	updates_backend.completed.connect(_updates_completed)
 	preview_backend = Backend.new()
 	add_child(preview_backend)
 	preview_backend.completed.connect(_preview_completed)
@@ -342,7 +348,7 @@ func _build_shell() -> void:
 	status_chip = Button.new()
 	status_chip.set_meta("focus_id","status")
 	status_chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	status_chip.pressed.connect(_confirm)
+	status_chip.pressed.connect(_status_chip_pressed)
 	status_chip.focus_entered.connect(func(): last_focus = "status")
 	bar.add_child(status_chip)
 	var steam := Button.new()
@@ -489,14 +495,19 @@ func _decky_completed(_command: String, data: Dictionary) -> void:
 	elif action == "set-password":
 		if data.get("password_set",false):
 			decky_status["password_set"] = true
-			_request_decky_secret("install")
+			_request_decky_secret(decky_action)
 			return
 	elif action in ["install", "install-desktop"]:
 		decky_handoff = data
-		if data.get("steam_restarting",false): notice = "Decky Loader %s installed. Steam restarts now to load it." % str(data.get("version",""))
+		if data.get("steam_restarting",false): notice = "Decky Loader %s installed%s. Steam restarts now to load it." % [str(data.get("version","")),_plugin_result(data)]
 		elif data.get("switching",false): notice = "Switching to Desktop Mode. The Decky installer opens there."
 		elif data.get("launched",false): notice = "The Decky installer opened in Konsole. Enter your password there."
 		else: notice = "Open Desktop Mode to install Decky; the installer needs your password."
+	elif action == "update-plugins":
+		var result := _plugin_result(data).trim_prefix("; ")
+		notice = ("Decky plugins: " + result + "." if result != "" else "Decky plugins are up to date.") + (" Steam restarts now." if data.get("steam_restarting",false) else "")
+		decky_status.erase("plugins")
+		_refresh_updates()
 	elif action == "plugin-install":
 		notice = "DeckCompanion plugin %s. Reload plugins in Decky." % ("installed" if data.get("changed",false) else "is already up to date")
 		_request_decky("plugin-status")
@@ -524,6 +535,16 @@ func _decky_card(column: Node) -> void:
 	var loader_row := _setting_row(card,"Decky Loader",line)
 	if not decky_status.is_empty() and (not installed or newer):
 		_chip("Update" if installed else "Install",_confirm_decky,loader_row,"decky_install",false,MINT,not decky_backend.busy).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var plugins: Array = decky_status.get("plugins",[])
+	if installed and not plugins.is_empty():
+		var outdated := _plugin_updates()
+		var plugin_names: Array = outdated.map(func(p): return "%s %s" % [str(p.get("name","")),str(p.get("latest",""))])
+		var plugins_line := ("%d installed  ·  up to date" % plugins.size()) if outdated.is_empty() else ("Updates: " + ", ".join(plugin_names))
+		var plugins_row := _setting_row(card,"Plugins",plugins_line)
+		if not outdated.is_empty() and not newer:
+			_chip("Update plugins",_confirm_decky_plugins,plugins_row,"decky_plugins",false,MINT,not decky_backend.busy).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		elif not outdated.is_empty():
+			_paragraph(card,"Updating Decky Loader updates these plugins too.",MUTED,15)
 	# The QAM plugin row appears once a plugin release exists (or it is installed).
 	var plugin_latest: Variant = plugin_status.get("latest",{}).get("version")
 	if plugin_latest != null or plugin_status.get("installed",false):
@@ -546,18 +567,81 @@ static func _version_less(a: String, b: String) -> bool:
 	return false
 
 func _confirm_decky() -> void:
+	decky_action = "install"
 	_open_decky_dialog("")
+
+func _confirm_decky_plugins() -> void:
+	decky_action = "update-plugins"
+	_open_decky_dialog("")
+
+func _plugin_updates() -> Array:
+	return decky_status.get("plugins",[]).filter(func(p): return p is Dictionary and p.get("update_available",false))
+
+## Corner chip: Apply when changes wait, otherwise jump to what needs the user.
+func _status_chip_pressed() -> void:
+	if status.get("pending",[]).size() > 0:
+		_confirm()
+		return
+	var offers: Array = updates_info.get("available",[])
+	if offers.is_empty(): return
+	var module := str(offers[0].get("module",""))
+	_switch_tab(2 if module.begins_with("decky") or module == "deckcompanion-plugin" else 1)
+
+static func _offer_name(offer: Dictionary) -> String:
+	match offer.get("module"):
+		"decky-loader": return "Decky"
+		"decky-plugins", "deckcompanion-plugin": return "Plugin"
+	return str(offer.get("name","Module"))
+
+func _refresh_updates() -> void:
+	if not updates_backend.busy: updates_backend.request("updates")
+
+## What changed in the background is announced once, then marked seen.
+func _updates_completed(_command: String, data: Dictionary) -> void:
+	if data.has("error"): return
+	var seen_call: bool = updates_backend.get_meta("seen",false)
+	updates_backend.set_meta("seen",false)
+	updates_info = data
+	var changed: Array = data.get("changed",[])
+	if not seen_call and not changed.is_empty():
+		var names: Array = []
+		for entry in changed.slice(0,3): names.append("%s %s" % [str(entry.get("name","")),str(entry.get("to",""))])
+		var more := changed.size() - names.size()
+		notice = "Updated in the background: " + ", ".join(names) + (" and %d more" % more if more > 0 else "") + "."
+		updates_backend.set_meta("seen",true)
+		updates_backend.request.call_deferred("updates",["--seen"])
+	# Light refresh: chip and notice only, so the library never rebuilds (no flicker).
+	_update_status_chip()
+	if error.is_empty() and not backend.busy:
+		notice_label.text = notice
+		notice_row.visible = not notice.is_empty()
+	if tab == 2: _render()
+
+## ", updated A; B could not be updated" for Loader and plugin results.
+static func _plugin_result(data: Dictionary) -> String:
+	var parts: Array = []
+	var updated: Array = data.get("plugins_updated",[])
+	if not updated.is_empty(): parts.append("updated " + ", ".join(updated))
+	var failed: Array = data.get("plugins_failed",[]).map(func(f): return str(f.get("name","")) if f is Dictionary else str(f))
+	if not failed.is_empty(): parts.append(", ".join(failed) + " could not be updated")
+	return "" if parts.is_empty() else "; " + "; ".join(parts)
 
 func _open_decky_dialog(problem: String) -> void:
 	decky_creating = decky_status.get("password_set") == false
 	var installed: bool = decky_status.get("installed",false)
 	var action := "Update" if installed else "Install"
+	var plugin_count := _plugin_updates().size()
+	var plugin_note := "" if plugin_count == 0 else (" Your %d plugin%s with updates get updated too." % [plugin_count,"" if plugin_count == 1 else "s"])
 	if decky_creating:
 		_dialog_text(decky_dialog,"Create a password for your Deck","SteamOS needs a password for system installs like Decky Loader, and your Deck doesn't have one yet. Choose a password and type it twice; DeckCompanion sets it as your Deck password. You'll need it again for future Decky updates.")
-		decky_dialog.ok_button_text = "Set password and " + action.to_lower()
+		decky_dialog.ok_button_text = "Set password and " + ("update" if decky_action == "update-plugins" else action.to_lower())
 	else:
-		_dialog_text(decky_dialog,"%s Decky Loader" % action,"Decky Loader installs as a system service, so SteamOS asks for your Deck password once. DeckCompanion passes it only to the official installer and never stores it.")
-		decky_dialog.ok_button_text = action
+		if decky_action == "update-plugins":
+			_dialog_text(decky_dialog,"Update Decky plugins","Decky plugins are system files, so SteamOS asks for your Deck password once. DeckCompanion updates %d plugin%s from the Decky store, restarts Steam and never stores the password." % [plugin_count,"" if plugin_count == 1 else "s"])
+			decky_dialog.ok_button_text = "Update"
+		else:
+			_dialog_text(decky_dialog,"%s Decky Loader" % action,"Decky Loader installs as a system service, so SteamOS asks for your Deck password once. DeckCompanion passes it only to the official installer and never stores it." + plugin_note)
+			decky_dialog.ok_button_text = action
 	decky_fields[1].visible = decky_creating
 	for field in decky_fields: field.text = ""
 	decky_error.text = problem
@@ -586,7 +670,7 @@ func _submit_decky_password() -> void:
 		_open_decky_dialog("The two passwords don't match.")
 		return
 	decky_pending_password = password
-	_request_decky_secret("set-password" if decky_creating else "install")
+	_request_decky_secret("set-password" if decky_creating else decky_action)
 
 func _request_decky_secret(action: String) -> void:
 	# The password goes to a private file in XDG_RUNTIME_DIR (RAM, user-only); the
@@ -602,8 +686,8 @@ func _request_decky_secret(action: String) -> void:
 		return
 	file.store_string(decky_pending_password)
 	file.close()
-	if action == "install": decky_pending_password = ""
-	notice = "Setting your Deck password…" if action == "set-password" else "Installing Decky Loader…"
+	if action != "set-password": decky_pending_password = ""
+	notice = {"set-password": "Setting your Deck password…", "update-plugins": "Updating Decky plugins…"}.get(action, "Installing Decky Loader…")
 	decky_backend.set_meta("action",action)
 	if not decky_backend.request("decky",[action,"--password-file",path]):
 		# Not accepted (busy): never leave the password behind on disk.
@@ -677,6 +761,7 @@ func _completed(command: String, data: Dictionary) -> void:
 				if not startup_settings_read:
 					startup_settings_read = true
 					if settings.get("check_updates_on_start",true): _check_updates()
+					_refresh_updates()
 			"default":
 				status = data
 				notice = "Change saved. Apply when you’re ready."
@@ -747,8 +832,12 @@ func _render() -> void:
 ## Corner status: a quiet checkmark when nothing waits, an Apply call to action otherwise.
 func _update_status_chip() -> void:
 	var count: int = status.get("pending",[]).size()
-	var waiting: bool = count > 0 and not backend.busy
-	status_chip.text = ("●  %d change%s · Apply" % [count,"" if count == 1 else "s"]) if count > 0 else "✓  Up to date"
+	var offers: int = updates_info.get("available",[]).size()
+	var waiting: bool = (count > 0 and not backend.busy) or (count == 0 and offers > 0)
+	if count > 0: status_chip.text = "●  %d change%s · Apply" % [count,"" if count == 1 else "s"]
+	elif offers == 1: status_chip.text = "↑  %s update" % _offer_name(updates_info.available[0])
+	elif offers > 1: status_chip.text = "↑  %d updates" % offers
+	else: status_chip.text = "✓  Up to date"
 	status_chip.disabled = not waiting
 	status_chip.focus_mode = Control.FOCUS_ALL if waiting else Control.FOCUS_NONE
 	status_chip.custom_minimum_size.y = 40
@@ -1274,7 +1363,9 @@ func _proton_completed(_command: String, data: Dictionary) -> void:
 		var job: Dictionary = data.get("job",{})
 		if job.get("state") == "failed": notice = "Proton builds: " + str(job.get("error","Download failed"))
 		var result: Dictionary = job.get("result",{})
-		if result.has("engine"): update = result
+		if result.has("engine"):
+			update = result
+			_refresh_updates()
 	if tab == 1: _render()
 
 func _install_proton(name: String) -> void:
