@@ -114,7 +114,7 @@ def test_cli_shapes_and_errors(paths, monkeypatch, capsys):
     code, result = invoke(capsys, "games")
     assert code == 0
     fs = next(g for g in result["games"] if g["appid"] == "2300320")
-    assert set(fs) == {"appid", "name", "installed", "has_recipe", "enabled", "pending", "recipe_version", "mods", "last_launch", "art", "proton"}
+    assert set(fs) == {"appid", "name", "installed", "has_recipe", "enabled", "pending", "recipe_version", "mods", "last_launch", "art", "proton", "last_played"}
     assert fs["last_launch"] is None and fs["enabled"] is False
     assert set(fs["mods"][0]) == {"id", "name", "version", "enabled", "installed_version", "state", "state_message"}
     assert invoke(capsys, "mod", "2300320", "fs25-deck-mode", "--off")[1]["mods"][0]["enabled"] is False
@@ -140,3 +140,16 @@ def test_shortcut_user_picks_most_recent_account(paths, monkeypatch):
         (config / "localconfig.vdf").write_text('"UserLocalConfigStore"\n{\n}\n')
         os.utime(config / "localconfig.vdf", (mtime, mtime))
     assert steam.shortcut_path(paths).parent.parent.name == "73549515"
+
+
+def test_last_played_from_localconfig(paths):
+    # Library sort uses Steam's LastPlayed (owner, Deck 2026-11-01).
+    config = paths.steam / "userdata/123/config"
+    config.mkdir(parents=True, exist_ok=True)
+    (config / "localconfig.vdf").write_text(
+        '"UserLocalConfigStore"\n{\n "Software"\n {\n  "Valve"\n  {\n   "Steam"\n   {\n    "apps"\n    {\n'
+        '     "2300320"\n     {\n      "LastPlayed"   "1793530000"\n     }\n     "480"\n     {\n      "LastPlayed"   "0"\n     }\n'
+        '    }\n   }\n  }\n }\n}\n', encoding="utf-8")
+    assert steam.last_played(paths) == {"2300320": 1793530000}
+    assert cli.game(paths, "2300320")["last_played"] == 1793530000
+    assert cli.game(paths, "480")["last_played"] is None

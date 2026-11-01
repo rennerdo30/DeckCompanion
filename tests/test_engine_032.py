@@ -93,7 +93,8 @@ def test_old_cached_fs25_does_not_hide_bundled_notes(game_paths, cached_version,
     assert recipes.load(game_paths, APP)["notes"] == "New player notes"
 
 
-@pytest.mark.parametrize("cached_version,cached_engine", [("1.0.1", "0.1.0"), ("1.0.0", "0.3.99")])
+# The second case: same recipe version, published by a newer engine than the running one.
+@pytest.mark.parametrize("cached_version,cached_engine", [("1.0.1", "0.1.0"), ("1.0.0", "99.0.0")])
 def test_newer_cached_fs25_is_retained(game_paths, cached_version, cached_engine):
     write_json(game_paths.cache / "index.json", index(text(cached_version, "Newer cached notes"), cached_engine))
     assert recipes.load(game_paths, APP)["notes"] == "Newer cached notes"

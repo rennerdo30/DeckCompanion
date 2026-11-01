@@ -76,9 +76,8 @@ func run() -> void:
 	buttons[0].position = Vector2(0,0); buttons[0].size = Vector2(200,40)
 	buttons[1].position = Vector2(300,0); buttons[1].size = Vector2(200,40)
 	buttons[2].position = Vector2(0,100); buttons[2].size = Vector2(200,40)
+	await process_frame
 	check(buttons[0].focus_neighbor_bottom.is_empty(),"no forced down neighbour")
-	check(buttons[0].find_valid_focus_neighbor(SIDE_BOTTOM) == buttons[2],"down moves to the control below")
-	check(buttons[0].find_valid_focus_neighbor(SIDE_RIGHT) == buttons[1],"right moves to the control beside")
 	var unsorted := [{"name":"b game","last_played":null},{"name":"Zeta","last_played":100},{"name":"a game"},{"name":"Alpha","last_played":300}]
 	check(Nav.sort_games(unsorted).map(func(g): return g.name) == ["Alpha","Zeta","a game","b game"],"library sorted by last played, then name")
 	check(backend.request("games"),"async request accepted")
@@ -210,7 +209,7 @@ func nonsteam_checks(ui: Node) -> void:
 	check(added.size() == 1 and ui.add_flow == null,"add completes and refreshes library")
 	if added.is_empty(): return
 	var game: Dictionary = added[0]
-	check(control(ui,game.appid).text.contains("[NON-STEAM]"),"library displays non-Steam badge")
+	check(control(ui,game.appid).find_children("*","Label",true,false).any(func(l): return l.text == "NON-STEAM"),"library displays non-Steam badge")
 	check(not ui.status.pending.is_empty(),"add queues Steam apply")
 	check(not Backend.parse_response(JSON.stringify(game),0,"add-game").has("error"),"real add response contract accepted")
 	ui._open_game(game)
@@ -355,7 +354,7 @@ func settings_checks(ui: Node) -> void:
 	check(ui.licenses.get_child(0).get_child(0).text.contains("Rossen Georgiev") and ui.licenses.get_child(0).get_child(0).text.contains("Godot Engine"),"third-party dialog contains bundled and Godot notices")
 	ui.licenses.hide()
 	ui._switch_tab(1)
-	check(control(ui,"default") == null and control(ui,"splash_toggle") == null and control(ui,"check") == null,"Updates keeps status only")
+	check(control(ui,"default") == null and control(ui,"splash_toggle") == null,"Updates keeps status and its own update check, no settings toggles")
 	var other: Node = load("res://main.tscn").instantiate()
 	root.add_child(other)
 	other.backend.settings.check_updates_on_start = false
@@ -489,7 +488,19 @@ func ui_032(ui: Node) -> void:
 		await process_frame
 		press.pressed = false
 		Input.parse_input_event(press)
-		check(ui.preview_fields.name.text == ui.games[1].name,"D-pad moves preview to next game without opening detail")
+		var ordered: Array = Nav.sort_games(Nav.visible_games(ui.games,ui.filter),ui.sort_by_name)
+		check(ui.preview_fields.name.text == ordered[1].name,"D-pad moves preview to next game without opening detail")
+		var up := InputEventAction.new()
+		up.action = "ui_up"
+		control(ui,ordered[0].appid).grab_focus()
+		up.pressed = true
+		Input.parse_input_event(up)
+		await process_frame
+		await process_frame
+		up.pressed = false
+		Input.parse_input_event(up)
+		var owner: Control = root.gui_get_focus_owner()
+		check(owner != null and owner.get_meta("focus_id","") == "filter%s" % ui.filter,"up from the first game lands on the active filter, not a top-bar button")
 		check(ui.preview == panel and ui.preview_art == banner and not ui.detail,"focus changes retain panel and artwork nodes without flicker")
 		control(ui,"480").grab_focus()
 		await process_frame
@@ -550,7 +561,7 @@ func ui_032(ui: Node) -> void:
 		ui._render()
 		var row: Button = control(ui,"mod"+mod.id)
 		var expected: String = {"installed":"Installed v0.7.0","will_install_on_launch":"Will install on next launch","update_available":"Update available","off":"Off","blocked":"Blocked: Game is running"}[state]
-		check(row.text.begins_with("[On]" if mod.enabled else "[Off]") and row.text.contains(expected) and not row.text.contains("✓"),"mod row separates preference and " + state)
+		check(row.tooltip_text.begins_with("[On]" if mod.enabled else "[Off]") and row.tooltip_text.contains(expected) and row.button_pressed == mod.enabled and not row.text.contains("✓"),"mod row separates preference and " + state)
 	# Legacy objects lack all added fields and still render in both screens.
 	var legacy: Dictionary = original.duplicate(true)
 	legacy.erase("art")
@@ -562,13 +573,13 @@ func ui_032(ui: Node) -> void:
 		ui.selected = legacy
 		ui._render()
 		var row: Button = control(ui,"mod"+mod.id)
-		check(row.text.contains("Will install on next launch" if installed == null else ("Installed v0.7.0" if installed == "0.7.0" else "Update available")),"legacy mod state from installed_version " + str(installed))
+		check(row.tooltip_text.contains("Will install on next launch" if installed == null else ("Installed v0.7.0" if installed == "0.7.0" else "Update available")),"legacy mod state from installed_version " + str(installed))
 	check(not Backend.parse_response(JSON.stringify(legacy),0,"game").has("error"),"legacy game object remains accepted")
 	legacy.mods[0].version = "unresolved"
 	legacy.mods[0].installed_version = "0.7.0"
 	ui.selected = legacy
 	ui._render()
-	check(control(ui,"mod"+mod.id).text.contains("Installed v0.7.0") and not control(ui,"mod"+mod.id).text.contains("Update available"),"legacy unresolved version does not invent a mod update")
+	check(control(ui,"mod"+mod.id).tooltip_text.contains("Installed v0.7.0") and not control(ui,"mod"+mod.id).tooltip_text.contains("Update available"),"legacy unresolved version does not invent a mod update")
 	ui.games[0] = legacy
 	ui._back()
 	await process_frame

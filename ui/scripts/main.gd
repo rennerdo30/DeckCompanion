@@ -9,10 +9,24 @@ const DragScroll = preload("res://scripts/drag_scroll.gd")
 const AddGame = preload("res://scripts/add_game.gd")
 var add_flow: RefCounted
 var remove_dialog: ConfirmationDialog
-const UI_VERSION := "0.3.4"
+const UI_VERSION := "0.4.0"
+# Design tokens (shared with the logo and Steam artwork palette).
 const INK := Color("e7f1f4")
-const MUTED := Color("9ab0bc")
+const MUTED := Color("8fa6b2")
 const MINT := Color("b8f18b")
+const CREAM := Color("e9d9a0")
+const WARN := Color("ffbd9d")
+const SURFACE := Color("101c25")
+const SURFACE_2 := Color("16262f")
+const SURFACE_3 := Color("1d3240")
+const LINE := Color("24404c")
+const FILTERS := ["All", "Has fix", "Enabled", "Non-Steam", "Attention"]
+var sort_by_name := false
+var status_chip: Button
+var notice_row: HBoxContainer
+var notice_label: Label
+var tab_bar: HBoxContainer
+var ui_config := ConfigFile.new()
 var backend: Node
 var root: VBoxContainer
 var body: VBoxContainer
@@ -106,32 +120,32 @@ static func _joy_button(button: JoyButton) -> InputEventJoypadButton:
 	joy.button_index = button
 	return joy
 
-func _style(bg: Color, border: Color = Color.TRANSPARENT) -> StyleBoxFlat:
+func _style(bg: Color, border: Color = Color.TRANSPARENT, radius := 10, pad_x := 14, pad_y := 8) -> StyleBoxFlat:
 	var box := StyleBoxFlat.new()
 	box.bg_color = bg
 	box.border_color = border
 	box.set_border_width_all(2 if border.a else 0)
-	box.set_corner_radius_all(12)
-	box.content_margin_left = 20
-	box.content_margin_right = 20
-	box.content_margin_top = 12
-	box.content_margin_bottom = 12
+	box.set_corner_radius_all(radius)
+	box.content_margin_left = pad_x
+	box.content_margin_right = pad_x
+	box.content_margin_top = pad_y
+	box.content_margin_bottom = pad_y
 	return box
 
 func _make_theme() -> void:
 	theme = Theme.new()
-	theme.default_font_size = 20
+	theme.default_font_size = 19
 	theme.set_color("font_color","Label",INK)
 	for state in ["normal","hover","pressed","disabled"]:
-		theme.set_stylebox(state,"Button",_style(Color("1c303c") if state != "hover" else Color("2b4652")))
-		theme.set_color("font_color" + ("" if state == "normal" else "_"+state),"Button",INK if state != "disabled" else Color("637b88"))
-	theme.set_stylebox("focus","Button",_style(Color(0.65,0.94,0.55,0.08),MINT))
-	theme.set_stylebox("panel","AcceptDialog",_style(Color("122530"),Color("638279")))
-	theme.set_constant("separation","VBoxContainer",12)
-	theme.set_constant("separation","HBoxContainer",12)
+		theme.set_stylebox(state,"Button",_style(SURFACE_3 if state != "hover" else Color("27434f")))
+		theme.set_color("font_color" + ("" if state == "normal" else "_"+state),"Button",INK if state != "disabled" else Color("5d7380"))
+	theme.set_stylebox("focus","Button",_style(Color(0.72,0.95,0.55,0.10),MINT))
+	theme.set_stylebox("panel","AcceptDialog",_style(Color("122530"),Color("4f6f6a"),14,20,16))
+	theme.set_constant("separation","VBoxContainer",10)
+	theme.set_constant("separation","HBoxContainer",10)
 	theme.set_color("font_color","CheckButton",INK)
 
-func _label(text: String, size_px := 20, color := INK) -> Label:
+func _label(text: String, size_px := 19, color := INK) -> Label:
 	var label := Label.new()
 	label.text = text
 	label.add_theme_font_size_override("font_size",size_px)
@@ -141,7 +155,7 @@ func _label(text: String, size_px := 20, color := INK) -> Label:
 func _button(text: String, action: Callable, parent: Node, id: String, enabled := true) -> Button:
 	var button := Button.new()
 	button.text = text
-	button.custom_minimum_size.y = 48
+	button.custom_minimum_size.y = 40
 	button.disabled = not enabled or backend.busy
 	button.set_meta("focus_id",id)
 	button.pressed.connect(action)
@@ -150,50 +164,125 @@ func _button(text: String, action: Callable, parent: Node, id: String, enabled :
 	if not button.disabled: controls.append(button)
 	return button
 
+## Compact pill used for tabs, filters and the status chip.
+func _chip(text: String, action: Callable, parent: Node, id: String, active := false, accent := MINT, enabled := true) -> Button:
+	var button := _button(text,action,parent,id,enabled)
+	button.custom_minimum_size.y = 40
+	button.add_theme_font_size_override("font_size",17)
+	var fill := Color(accent.r,accent.g,accent.b,0.16) if active else Color(0,0,0,0)
+	for state in ["normal","pressed","disabled"]:
+		button.add_theme_stylebox_override(state,_style(fill,Color(accent.r,accent.g,accent.b,0.55) if active else LINE,17,14,4))
+	button.add_theme_stylebox_override("hover",_style(Color(1,1,1,0.06),LINE,17,14,4))
+	button.add_theme_stylebox_override("focus",_style(Color(0.72,0.95,0.55,0.10),MINT,17,14,4))
+	button.add_theme_color_override("font_color",accent if active else INK)
+	return button
+
+## Small read-only pill (status badges).
+func _badge(parent: Node, text: String, color := MINT) -> Label:
+	var label := _label(text,15,color)
+	var box := _style(Color(color.r,color.g,color.b,0.14),Color(0,0,0,0),10,9,2)
+	label.add_theme_stylebox_override("normal",box)
+	parent.add_child(label)
+	return label
+
 func _row(parent: Node) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	parent.add_child(row)
 	return row
 
-func _card(parent: Node) -> VBoxContainer:
+func _card(parent: Node, title := "") -> VBoxContainer:
 	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel",_style(Color("12232e")))
+	panel.add_theme_stylebox_override("panel",_style(SURFACE,Color(0,0,0,0),14,16,12))
 	parent.add_child(panel)
 	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation",12)
 	panel.add_child(column)
+	if not title.is_empty(): column.add_child(_label(title.to_upper(),15,MINT))
 	return column
 
-func _paragraph(parent: Node, text: String, color := MUTED) -> void:
-	var label := _label(text,19,color)
+func _paragraph(parent: Node, text: String, color := MUTED, size_px := 17) -> Label:
+	var label := _label(text,size_px,color)
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	parent.add_child(label)
+	return label
+
+static func _ago(unix: Variant) -> String:
+	if unix == null or int(unix) <= 0: return "Never played"
+	var minutes := int((Time.get_unix_time_from_system() - float(unix)) / 60.0)
+	if minutes < 2: return "Played just now"
+	if minutes < 60: return "Played %d min ago" % minutes
+	if minutes < 48 * 60: return "Played %d h ago" % (minutes / 60)
+	return "Played %d days ago" % (minutes / 1440)
 
 func _build_shell() -> void:
+	if ui_config.load("user://ui.cfg") == OK:
+		filter = clampi(int(ui_config.get_value("library","filter",0)),0,FILTERS.size()-1)
+		sort_by_name = bool(ui_config.get_value("library","sort_by_name",false))
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left","right","top","bottom"]: margin.add_theme_constant_override("margin_"+side,32 if side != "bottom" else 16)
+	for side in ["left","right"]: margin.add_theme_constant_override("margin_"+side,20)
+	margin.add_theme_constant_override("margin_top",12)
+	margin.add_theme_constant_override("margin_bottom",6)
 	add_child(margin)
 	root = VBoxContainer.new()
+	root.add_theme_constant_override("separation",8)
 	margin.add_child(root)
-	var brand := _row(root)
-	brand.add_child(_label("◈  DECKCOMPANION",20,MINT))
+	# One slim bar: brand, tabs, status and the way back to Steam (DC-31, DC-25).
+	var bar := _row(root)
+	bar.custom_minimum_size.y = 48
+	bar.add_theme_constant_override("separation",8)
+	var logo := TextureRect.new()
+	logo.texture = load("res://icon.svg")
+	logo.custom_minimum_size = Vector2(34,34)
+	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	logo.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	bar.add_child(logo)
+	var brand := _label("DeckCompanion",20,INK)
+	brand.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	bar.add_child(brand)
+	var gap := Control.new()
+	gap.custom_minimum_size.x = 14
+	bar.add_child(gap)
+	tab_bar = _row(bar)
+	tab_bar.add_theme_constant_override("separation",6)
+	tab_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	brand.add_child(spacer)
-	brand.add_child(_label("LOCAL PREVIEW  /  MOCK DATA" if backend.mock else "YOUR DECK. YOUR GAMES.",15,MUTED))
+	bar.add_child(spacer)
+	if backend.mock: _badge(bar,"MOCK DATA",CREAM).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	status_chip = Button.new()
+	status_chip.set_meta("focus_id","status")
+	status_chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	status_chip.pressed.connect(_confirm)
+	status_chip.focus_entered.connect(func(): last_focus = "status")
+	bar.add_child(status_chip)
+	var steam := Button.new()
+	steam.text = "Back to Steam"
+	steam.set_meta("focus_id","steam")
+	steam.custom_minimum_size.y = 40
+	steam.add_theme_font_size_override("font_size",17)
+	steam.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	steam.pressed.connect(_back_to_steam)
+	steam.focus_entered.connect(func(): last_focus = "steam")
+	bar.add_child(steam)
+	apply_button = steam  # Kept for tests that look up a shell button; Apply now lives in the status chip.
+	var rule := ColorRect.new()
+	rule.color = LINE
+	rule.custom_minimum_size.y = 1
+	root.add_child(rule)
+	notice_row = _row(root)
+	notice_label = _label("",17,MINT)
+	notice_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	notice_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	notice_row.add_child(notice_label)
 	body = VBoxContainer.new()
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_theme_constant_override("separation",10)
 	root.add_child(body)
-	var pending := PanelContainer.new()
-	pending.add_theme_stylebox_override("panel",_style(Color("23382e")))
-	root.add_child(pending)
-	var row := _row(pending)
-	pending_label = _label("")
-	pending_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(pending_label)
-	apply_button = _button("Apply and restart Steam",_confirm,row,"apply")
+	pending_label = notice_label
 	hints = Hints.new()
-	hints.custom_minimum_size.y = 44
+	hints.custom_minimum_size.y = 36
 	root.add_child(hints)
 	dialog = ConfirmationDialog.new()
 	dialog.title = "Apply changes and restart Steam?"
@@ -217,6 +306,15 @@ func _build_shell() -> void:
 	remove_dialog.confirmed.connect(func(): _request("remove-game",[selected.slug]))
 	remove_dialog.canceled.connect(_restore_modal_focus)
 	add_child(remove_dialog)
+
+func _back_to_steam() -> void:
+	# Steam brings its library back as soon as this non-Steam app exits.
+	get_tree().quit()
+
+func _save_ui_config() -> void:
+	ui_config.set_value("library","filter",filter)
+	ui_config.set_value("library","sort_by_name",sort_by_name)
+	ui_config.save("user://ui.cfg")
 
 func _restore_modal_focus() -> void:
 	if is_instance_valid(modal_focus) and modal_focus.is_visible_in_tree(): modal_focus.grab_focus()
@@ -304,88 +402,203 @@ func _render() -> void:
 		node.queue_free()
 	controls.clear()
 	log_view = null
-	var heading := _row(body)
-	var title := _label(("Game details" if detail and not selected.is_empty() else "Your library") if tab == 0 else ("Updates" if tab == 1 else "Settings"),38)
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	heading.add_child(title)
-	_button("Games" + ("  •" if tab == 0 else ""),func(): _switch_tab(0),heading,"games")
-	_button("Updates" + ("  •" if tab == 1 else ""),func(): _switch_tab(1),heading,"updates")
-	_button("Settings" + ("  •" if tab == 2 else ""),func(): _switch_tab(2),heading,"settings")
-	if backend.busy: body.add_child(_label("Working…  Your changes are being read safely.",18,MINT))
-	elif not error.is_empty():
-		var alert := _card(body)
-		_paragraph(alert,error,Color("ffbd9d"))
-		_button("Try again",func(): _request(failed_command,failed_args),alert,"retry")
-	elif not notice.is_empty(): body.add_child(_label(notice,18,MINT))
+	for node in tab_bar.get_children():
+		tab_bar.remove_child(node)
+		node.queue_free()
+	for i in 3:
+		_chip(["Library","Updates","Settings"][i],_switch_tab.bind(i),tab_bar,["games","updates","settings"][i],tab == i)
+	for node in notice_row.get_children():
+		if node != notice_label:
+			notice_row.remove_child(node)
+			node.queue_free()
+	notice_label.add_theme_color_override("font_color",WARN if not error.is_empty() else MINT)
+	notice_label.text = "Working…" if backend.busy else (error if not error.is_empty() else notice)
+	if not error.is_empty() and not backend.busy:
+		_chip("Try again",func(): _request(failed_command,failed_args),notice_row,"retry",false,WARN)
+	notice_row.visible = not notice_label.text.is_empty()
 	if tab == 2: _settings_screen()
 	elif tab == 1: _updates_screen()
 	elif add_flow != null: add_flow.render()
 	elif detail and not selected.is_empty(): _detail_screen()
 	else: _games_screen()
-	var count: int = status.get("pending",[]).size()
-	pending_label.text = "%s pending change%s" % [count,"" if count == 1 else "s"] if count else "Everything is up to date  ·  No pending changes"
-	apply_button.disabled = count == 0 or backend.busy
-	if not apply_button.disabled: controls.append(apply_button)
+	_update_status_chip()
 	hints.keyboard = keyboard
 	hints.detail = detail
 	hints.library_preview = is_instance_valid(preview)
 	hints.queue_redraw()
 	Nav.wire(controls)
 	_restore_focus.call_deferred()
+	_wire_top_row.call_deferred()
+
+## Corner status: a quiet checkmark when nothing waits, an Apply call to action otherwise.
+func _update_status_chip() -> void:
+	var count: int = status.get("pending",[]).size()
+	var waiting: bool = count > 0 and not backend.busy
+	status_chip.text = ("●  %d change%s · Apply" % [count,"" if count == 1 else "s"]) if count > 0 else "✓  Up to date"
+	status_chip.disabled = not waiting
+	status_chip.focus_mode = Control.FOCUS_ALL if waiting else Control.FOCUS_NONE
+	status_chip.custom_minimum_size.y = 40
+	status_chip.add_theme_font_size_override("font_size",17)
+	var accent := MINT if waiting else MUTED
+	for state in ["normal","pressed","disabled","hover"]:
+		status_chip.add_theme_stylebox_override(state,_style(Color(accent.r,accent.g,accent.b,0.16 if waiting else 0.0),Color(accent.r,accent.g,accent.b,0.6) if waiting else Color(0,0,0,0),17,14,4))
+	status_chip.add_theme_stylebox_override("focus",_style(Color(0.72,0.95,0.55,0.10),MINT,17,14,4))
+	for key in ["font_color","font_disabled_color","font_hover_color","font_pressed_color"]:
+		status_chip.add_theme_color_override(key,accent)
+	if waiting: controls.append(status_chip)
+
+const SHELL_IDS := ["games","updates","settings","status","steam","retry"]
+
+## Up from the first content row goes to the active tab, not to whatever top-bar
+## button happens to be geometrically closest.
+func _wire_top_row() -> void:
+	await get_tree().process_frame
+	var tab_chip: Control = null
+	for chip in tab_bar.get_children():
+		if chip is Control and chip.get_meta("focus_id","") == ["games","updates","settings"][tab]: tab_chip = chip
+	if tab_chip == null: return
+	var content: Array = controls.filter(func(c): return is_instance_valid(c) and c.is_visible_in_tree() and not SHELL_IDS.has(c.get_meta("focus_id","")))
+	if content.is_empty(): return
+	var top_y: float = content.map(func(c): return c.get_global_rect().position.y).min()
+	for control in content:
+		if control.get_global_rect().position.y <= top_y + 12: control.focus_neighbor_top = control.get_path_to(tab_chip)
+	tab_chip.focus_neighbor_bottom = tab_chip.get_path_to(content.filter(func(c): return c.get_global_rect().position.y <= top_y + 12)[0])
 
 func _restore_focus() -> void:
 	if not controls.is_empty():
+		# Start on the content, not on the tab bar.
 		var target: Control = controls[0]
+		for control in controls:
+			if not SHELL_IDS.has(control.get_meta("focus_id","")):
+				target = control
+				break
 		for control in controls:
 			if control.get_meta("focus_id","") == last_focus: target = control
 		if is_instance_valid(target) and target.is_inside_tree(): target.grab_focus()
 
 func _games_screen() -> void:
-	var filters := _row(body)
-	_button("＋  Add a game",func(): notice = ""; error = ""; add_flow = AddGame.new(self); _render(),filters,"add-game")
-	for i in 3:
-		_button((["All games","Has fix","Enabled"][i]) + ("  ✓" if filter == i else ""),_set_filter.bind(i),filters,"filter%s" % i)
+	# Toolbar: filters, sort and Add game in one compact row (DC-24).
+	var toolbar := _row(body)
+	toolbar.add_theme_constant_override("separation",6)
+	for i in FILTERS.size():
+		_chip(FILTERS[i],_set_filter.bind(i),toolbar,"filter%s" % i,filter == i)
+	var push := Control.new()
+	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	toolbar.add_child(push)
+	_chip("Sort: " + ("A–Z" if sort_by_name else "Recent"),_toggle_sort,toolbar,"sort")
+	_chip("＋  Add game",func(): notice = ""; error = ""; add_flow = AddGame.new(self); _render(),toolbar,"add-game",true,CREAM)
 	var library := games if settings.get("show_games_without_recipe",true) else games.filter(func(game): return game.has_recipe or game.get("kind") == "non_steam")
-	var visible := Nav.sort_games(Nav.visible_games(library,filter))
+	var visible := Nav.sort_games(Nav.visible_games(library,filter),sort_by_name)
+	# Land on the most relevant game, not on the filter row.
+	if (last_focus.is_empty() or SHELL_IDS.has(last_focus)) and not visible.is_empty(): last_focus = visible[0].appid
 	var split := _row(body)
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	split.add_theme_constant_override("separation",14)
 	var scroll := DragScroll.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_stretch_ratio = 1.2
+	scroll.size_flags_stretch_ratio = 1.15
 	scroll.follow_focus = true
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	split.add_child(scroll)
 	var list := VBoxContainer.new()
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation",6)
 	scroll.add_child(list)
 	if visible.is_empty():
-		_paragraph(list,"No games match this filter." if not games.is_empty() else "Your library is waiting. Install a Steam game, then refresh.")
-		_button("Refresh library",_refresh,list,"refresh")
+		_paragraph(list,"No games match this filter." if not games.is_empty() else "Your library is waiting. Install a Steam game, then refresh.",MUTED,16)
+		_chip("Refresh library",_refresh,list,"refresh")
+	var active_filter: Control = toolbar.get_child(filter)
 	for game in visible:
-		var state := Text.fix(game)
-		var launch: Variant = game.get("last_launch")
-		var result := "Not launched" if launch == null else ("Last handoff OK" if launch.get("ok",false) else "Preparation failed")
-		var summary: String = "Recipe " + str(game.get("recipe_version","")) + "   ·   " + state if game.has_recipe else state
-		var text: String = game.name + "\n" + summary + "   ·   " + result
-		if game.get("kind") == "non_steam": text = game.name + "  [NON-STEAM]\n" + ("Shortcut queued  ·  " if game.get("shortcut_pending") else "") + summary
-		var button := _button(text,_open_game.bind(game),list,game.appid)
-		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		button.add_theme_font_size_override("font_size",18)
-		button.custom_minimum_size.y = 92
-		button.focus_entered.connect(_focus_game.bind(game))
-		button.mouse_entered.connect(_focus_game.bind(game))
-	preview = _card(split)
-	preview.get_parent().size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# Clip/scroll long notes and mod lists inside the panel, keeping the footer fixed.
+		var row := _game_row(list,game)
+		if game == visible[0]: row.focus_neighbor_top = row.get_path_to(active_filter)
+	_preview_panel(split,visible)
+
+## One dense library row: thumbnail, name, one status line and a badge.
+func _game_row(list: Node, game: Dictionary) -> Button:
+	var button := _button("",_open_game.bind(game),list,game.appid)
+	button.custom_minimum_size.y = 74
+	button.add_theme_stylebox_override("normal",_style(SURFACE,Color(0,0,0,0),12,8,6))
+	button.add_theme_stylebox_override("hover",_style(SURFACE_2,Color(0,0,0,0),12,8,6))
+	button.add_theme_stylebox_override("focus",_style(Color(0.72,0.95,0.55,0.10),MINT,12,8,6))
+	button.focus_entered.connect(_focus_game.bind(game))
+	button.mouse_entered.connect(_focus_game.bind(game))
+	var inner := HBoxContainer.new()
+	inner.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	inner.offset_left = 8
+	inner.offset_right = -12
+	inner.offset_top = 6
+	inner.offset_bottom = -6
+	inner.add_theme_constant_override("separation",12)
+	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(inner)
+	var thumb := GameArt.new()
+	thumb.cache = art_cache
+	thumb.custom_minimum_size = Vector2(128,60)
+	inner.add_child(thumb)
+	thumb.show_game(game)
+	var text := VBoxContainer.new()
+	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text.alignment = BoxContainer.ALIGNMENT_CENTER
+	text.add_theme_constant_override("separation",2)
+	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	inner.add_child(text)
+	var name_label := _label(game.name,20,INK)
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	name_label.clip_text = true
+	text.add_child(name_label)
+	var line := _label(_row_line(game),16,MUTED)
+	line.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	line.clip_text = true
+	text.add_child(line)
+	var badge := _row_badge(game)
+	if not badge.is_empty():
+		var label := _badge(inner,badge[0],badge[1])
+		label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	for node in inner.find_children("*","Control",true,false): node.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return button
+
+func _row_line(game: Dictionary) -> String:
+	var parts: Array = []
+	if game.get("kind") == "non_steam": parts.append("Non-Steam · umu")
+	elif game.get("has_recipe",false): parts.append(Text.fix(game))
+	else: parts.append("Steam default")
+	var build: Variant = game.get("proton")
+	if build is Dictionary: parts.append(str(build.get("name","")))
+	parts.append(_ago(game.get("last_played")))
+	return "  ·  ".join(parts)
+
+func _row_badge(game: Dictionary) -> Array:
+	if Nav.needs_attention(game): return ["CHECK", WARN]
+	if game.get("pending") != null: return ["PENDING", CREAM]
+	if game.get("kind") == "non_steam": return ["NON-STEAM", CREAM]
+	if game.get("has_recipe",false): return ["FIX ON" if game.get("enabled",false) else "FIX", MINT]
+	return []
+
+## Right-hand preview of the focused game. Nodes persist while focus moves (no flicker).
+func _preview_panel(split: Node, visible: Array) -> void:
+	var panel := PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel",_style(SURFACE,Color(0,0,0,0),14,0,0))
+	split.add_child(panel)
+	preview = VBoxContainer.new()
+	preview.add_theme_constant_override("separation",0)
+	panel.add_child(preview)
+	preview_art = _banner(preview, 190)
 	preview_scroll = DragScroll.new()
 	preview_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	preview_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	preview.add_child(preview_scroll)
+	var pad := MarginContainer.new()
+	pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for side in ["left","right"]: pad.add_theme_constant_override("margin_"+side,16)
+	pad.add_theme_constant_override("margin_top",12)
+	pad.add_theme_constant_override("margin_bottom",12)
+	preview_scroll.add_child(pad)
 	var content := VBoxContainer.new()
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	content.add_theme_constant_override("separation",8)
-	preview_scroll.add_child(content)
-	preview_art = _banner(content, 150)
-	for spec in [["name",27,INK],["fix",18,MINT],["proton",18,INK],["mods",18,INK],["launch",16,MUTED],["note",18,MUTED]]:
+	content.add_theme_constant_override("separation",6)
+	pad.add_child(content)
+	for spec in [["name",26,INK],["fix",17,MINT],["proton",17,INK],["mods",17,INK],["launch",16,MUTED],["note",17,MUTED]]:
 		var label := _label("",spec[1],spec[2])
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		content.add_child(label)
@@ -395,12 +608,18 @@ func _games_screen() -> void:
 		preview_fields.note.text = "Install a Steam game, then refresh your library."
 	elif visible.is_empty():
 		preview_fields.name.text = "No matching games"
-		preview_fields.note.text = "Try another library filter."
+		preview_fields.note.text = "Try another filter."
 	else:
 		var initial: Dictionary = visible[0]
 		for game in visible:
 			if game.appid == focused_game: initial = game
 		_focus_game(initial)
+
+func _toggle_sort() -> void:
+	sort_by_name = not sort_by_name
+	last_focus = "sort"
+	_save_ui_config()
+	_render()
 
 func _banner(parent: Node, height: int) -> Control:
 	var art := GameArt.new()
@@ -446,46 +665,96 @@ func _open_game(game: Dictionary) -> void:
 	_request("game",[game.appid])
 
 func _detail_screen() -> void:
-	var row := _row(body)
-	_button("‹  Library",_back,row,"back")
-	var name_label := _label(selected.name,28)
-	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(name_label)
+	# Hero: artwork with the name and state on top, back action in the corner.
+	var hero := Control.new()
+	hero.custom_minimum_size.y = 176
+	hero.clip_contents = true
+	body.add_child(hero)
+	var art := GameArt.new()
+	art.cache = art_cache
+	art.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hero.add_child(art)
+	art.show_game(selected)
+	var shade := TextureRect.new()
+	var gradient := Gradient.new()
+	gradient.set_color(0,Color(0.04,0.07,0.09,0.0))
+	gradient.set_color(1,Color(0.04,0.07,0.09,0.92))
+	var fill := GradientTexture2D.new()
+	fill.gradient = gradient
+	fill.fill_from = Vector2(0,0)
+	fill.fill_to = Vector2(0,1)
+	shade.texture = fill
+	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	shade.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	shade.stretch_mode = TextureRect.STRETCH_SCALE
+	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hero.add_child(shade)
+	var overlay := MarginContainer.new()
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for side in ["left","right"]: overlay.add_theme_constant_override("margin_"+side,16)
+	overlay.add_theme_constant_override("margin_top",10)
+	overlay.add_theme_constant_override("margin_bottom",12)
+	hero.add_child(overlay)
+	var stack := VBoxContainer.new()
+	overlay.add_child(stack)
+	var top := _row(stack)
+	_chip("‹  Library",_back,top,"back")
+	var grow := Control.new()
+	grow.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	stack.add_child(grow)
+	var name_label := _label(selected.name,32,INK)
+	name_label.add_theme_color_override("font_shadow_color",Color(0,0,0,0.6))
+	name_label.add_theme_constant_override("shadow_offset_y",2)
+	stack.add_child(name_label)
+	var chips := _row(stack)
+	chips.add_theme_constant_override("separation",6)
+	_badge(chips,Text.fix(selected),MINT if selected.get("has_recipe",false) else MUTED)
+	_badge(chips,Text.proton(selected),INK)
+	_badge(chips,_ago(selected.get("last_played")),MUTED)
+	# Two columns use the full height: setup on the left, notes and log on the right.
+	var columns := _row(body)
+	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	columns.add_theme_constant_override("separation",14)
+	var left_scroll := DragScroll.new()
+	left_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	left_scroll.follow_focus = true
+	columns.add_child(left_scroll)
+	screen_scroll = left_scroll
+	var left := VBoxContainer.new()
+	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left_scroll.add_child(left)
+	var setup := _card(left,"Setup")
 	var enabled: bool = selected.get("pending") == "enable" or (selected.get("pending") == null and selected.enabled)
 	if selected.get("kind") == "non_steam":
-		_button("Remove game",func(): modal_focus = get_viewport().gui_get_focus_owner(); remove_dialog.popup_centered(); remove_dialog.get_cancel_button().grab_focus(),row,"remove-game")
-	else: _button("Disable" if enabled else "Enable DeckCompanion",_toggle_game,row,"toggle",selected.has_recipe)
-	var scroll := DragScroll.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.follow_focus = true
-	body.add_child(scroll)
-	var column := VBoxContainer.new()
-	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(column)
-	var banner := _banner(column, 170)
-	banner.show_game(selected)
-	_paragraph(column,Text.fix(selected) + "  ·  " + Text.proton(selected),MINT)
-	var mods := _card(column)
-	mods.add_child(_label("Mods & recipe",23))
-	if selected.mods.is_empty(): _paragraph(mods,"No optional mods in this recipe." if selected.has_recipe else "A recipe isn’t available yet. Steam will launch this game normally.")
+		var remove_row := _setting_row(setup,"Non-Steam game","Runs through umu-launcher with its own save prefix.")
+		_chip("Remove game",func(): modal_focus = get_viewport().gui_get_focus_owner(); remove_dialog.popup_centered(); remove_dialog.get_cancel_button().grab_focus(),remove_row,"remove-game",false,WARN).size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	else:
+		var toggle_row := _setting_row(setup,"Use DeckCompanion fixes","Applies this game's recipe at launch." if selected.has_recipe else "No recipe yet. Steam launches this game normally.")
+		_state_switch(toggle_row,"toggle",enabled,_toggle_game,selected.has_recipe)
+	_setting_row(setup,"Proton",Text.proton(selected))
+	var mods := _card(left,"Mods")
+	if selected.mods.is_empty(): _paragraph(mods,"No optional mods in this recipe." if selected.has_recipe else "No mods for this game yet.")
 	for mod in selected.mods:
-		var mod_button := _button(Text.mod_label(mod),_toggle_mod.bind(mod),mods,"mod"+mod.id)
-		mod_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		mod_button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		mod_button.add_theme_font_size_override("font_size",19)
-	var notes := _card(column)
-	notes.add_child(_label("Recipe notes",23))
-	_paragraph(notes,str(selected.get("notes","Loading recipe notes…")))
-	var logs := _card(column)
-	logs.add_child(_label("Last launch log",23))
+		var mod_row := _setting_row(mods,"%s  %s" % [mod.get("name","Mod"),Text.version(mod.get("version"))],Text.mod_label(mod).get_slice(" — ",1))
+		_state_switch(mod_row,"mod"+mod.id,mod.get("enabled",false),_toggle_mod.bind(mod)).tooltip_text = Text.mod_label(mod)
+	var right := VBoxContainer.new()
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	columns.add_child(right)
+	var notes := _card(right,"Recipe notes")
+	_paragraph(notes,str(selected.get("notes","Loading recipe notes…")) if str(selected.get("notes","")) != "" else "No notes.",INK)
+	var logs := _card(right,"Last launch")
+	logs.get_parent().size_flags_vertical = Control.SIZE_EXPAND_FILL
+	logs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_paragraph(logs,Text.launch(selected),MUTED,16)
 	log_view = DragScroll.new()
-	log_view.custom_minimum_size.y = 125
+	log_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	log_view.custom_minimum_size.y = 90
 	log_view.focus_mode = Control.FOCUS_ALL
 	log_view.add_theme_stylebox_override("focus",_style(Color.TRANSPARENT,MINT))
 	logs.add_child(log_view)
 	controls.append(log_view)
-	var log_text := _label("\n".join(selected.get("log_tail",[])) if not selected.get("log_tail",[]).is_empty() else "No launch log yet.",17,MUTED)
+	var log_text := _label("\n".join(selected.get("log_tail",[])) if not selected.get("log_tail",[]).is_empty() else "No launch log yet.",15,MUTED)
 	log_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	log_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	log_view.add_child(log_text)
@@ -506,49 +775,69 @@ func _scroll_column() -> VBoxContainer:
 	return column
 
 func _settings_screen() -> void:
-	var column := _scroll_column()
-	var splash_card := _card(column)
-	splash_card.add_theme_constant_override("separation",20)
-	splash_card.add_child(_label("General",23))
+	var columns := _two_columns()
+	var general := _card(columns[0],"General")
 	var splash_enabled: bool = settings.get("splash",true)
-	var splash_row := _setting_row(splash_card,"Launch splash","See your Proton build, fixes and mods before launch. Skip with A or pause with Y.")
+	var splash_row := _setting_row(general,"Launch splash","Shows Proton, fixes and mods before a game starts. A skips, Y holds.")
 	_state_switch(splash_row,"splash_toggle",splash_enabled,func(): _request("settings",["--splash","off" if splash_enabled else "on"]),not settings.is_empty())
-	var duration_row := _setting_row(splash_card,"Splash duration","Your game starts automatically after this time.")
+	var duration_row := _setting_row(general,"Splash duration","The game starts automatically after this time.")
 	var stepper := _row(duration_row)
+	stepper.add_theme_constant_override("separation",4)
 	stepper.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var seconds: float = settings.get("splash_seconds",4.0)
-	_button("−",func(): _request("settings",["--splash-seconds",str(seconds-0.5)]),stepper,"splash_less",seconds > 1 and not settings.is_empty()).tooltip_text = "Reduce by 0.5 seconds"
-	var duration_value := _label("%.1f s" % seconds,20,MINT)
-	duration_value.custom_minimum_size.x = 64
+	_chip("−",func(): _request("settings",["--splash-seconds",str(seconds-0.5)]),stepper,"splash_less",false,MINT,seconds > 1 and not settings.is_empty())
+	var duration_value := _label("%.1f s" % seconds,19,MINT)
+	duration_value.custom_minimum_size.x = 56
 	duration_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	duration_value.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	stepper.add_child(duration_value)
-	_button("+",func(): _request("settings",["--splash-seconds",str(seconds+0.5)]),stepper,"splash_more",seconds < 10 and not settings.is_empty()).tooltip_text = "Increase by 0.5 seconds"
+	_chip("+",func(): _request("settings",["--splash-seconds",str(seconds+0.5)]),stepper,"splash_more",false,MINT,seconds < 10 and not settings.is_empty())
 	var pending_actions: Array = status.get("pending",[]).map(func(p): return p.get("action",""))
 	var is_default: bool = status.get("default_tool",false)
 	if pending_actions.has("default_on"): is_default = true
 	elif pending_actions.has("default_off"): is_default = false
-	var defaults := _setting_row(splash_card,"Default for all games","Use for Windows games without their own compatibility setting. Apply restarts Steam.")
+	var defaults := _setting_row(general,"Default for all games","Windows games without their own setting run through DeckCompanion. Apply restarts Steam.")
 	_state_switch(defaults,"default",is_default,func(): _request("default",["--off" if is_default else "--on"]))
-	var library := _card(column)
-	library.add_child(_label("Library",23))
-	_setting_toggle(library,"show_games_without_recipe","Show games without a recipe","Keep every installed game visible, including games with no DeckCompanion recipe.")
-	var updates := _card(column)
-	updates.add_child(_label("Updates",23))
-	_setting_toggle(updates,"check_updates_on_start","Check when DeckCompanion opens","Check the engine and recipe index in the background when the UI opens.")
-	_setting_toggle(updates,"auto_install_ge","Install newest GE-Proton","Updates always install builds pinned by enabled recipes. Also install the newest GE-Proton release.")
-	_setting_toggle(updates,"cleanup_old_ge","Clean up old GE-Proton","Keep enabled recipe pins, the newest GE and all builds installed elsewhere. Cleanup waits until Steam is closed.")
-	var check_row := _setting_row(updates,"Check for updates","Look for a newer engine and recipe index now.")
-	_button("Checking…" if update_backend.busy else "Check now",_check_updates,check_row,"check",not update_backend.busy).size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var about := _card(column)
-	about.add_child(_label("About",23))
-	_paragraph(about,"Engine %s  ·  UI %s\nInstall path: %s" % [status.get("version","Not connected"),UI_VERSION,status.get("install_path","Not reported by engine")])
-	_paragraph(about,"Close Steam, then run this command to uninstall DeckCompanion. Your data is preserved.")
+	var library := _card(columns[0],"Library")
+	_setting_toggle(library,"show_games_without_recipe","Show games without a recipe","Keep every installed game in the library.")
+	var updates := _card(columns[1],"Updates")
+	_setting_toggle(updates,"check_updates_on_start","Check when DeckCompanion opens","Looks for a newer engine and recipes in the background.")
+	_setting_toggle(updates,"auto_install_ge","Install newest GE-Proton","Recipe pins are always installed; this also keeps the newest GE.")
+	_setting_toggle(updates,"cleanup_old_ge","Clean up old GE-Proton","Removes only builds DeckCompanion installed and no longer needs.")
+	var check_row := _setting_row(updates,"Check for updates","Engine, recipes and Proton builds.")
+	_chip("Checking…" if update_backend.busy else "Check now",_check_updates,check_row,"check").size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var about := _card(columns[1],"About")
+	_paragraph(about,"Engine %s  ·  UI %s\n%s" % [status.get("version","not connected"),UI_VERSION,status.get("install_path","Install path not reported")])
+	_paragraph(about,"Uninstall (close Steam first, your data is kept):",MUTED,16)
 	var path: String = str(status.get("install_path","~/.local/share/deckcompanion")).path_join("bin/deckcompanion")
-	var command := _label("'%s' uninstall --json" % path.replace("'","'\\''"),17,MINT)
+	var command := _label("'%s' uninstall --json" % path.replace("'","'\\''"),16,MINT)
 	command.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	about.add_child(command)
-	_button("MIT license",_show_license.bind(false),about,"license")
-	_button("Third-party notices",_show_license.bind(true),about,"notices")
+	var legal := _row(about)
+	legal.add_theme_constant_override("separation",6)
+	_chip("MIT license",_show_license.bind(false),legal,"license")
+	_chip("Third-party notices",_show_license.bind(true),legal,"notices")
+
+## A scrolling two-column page; returns [left, right] columns.
+func _two_columns() -> Array:
+	var scroll := DragScroll.new()
+	screen_scroll = scroll
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.follow_focus = true
+	body.add_child(scroll)
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_theme_constant_override("separation",14)
+	scroll.add_child(row)
+	var result: Array = []
+	for i in 2:
+		var column := VBoxContainer.new()
+		column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		column.add_theme_constant_override("separation",12)
+		row.add_child(column)
+		result.append(column)
+	return result
 
 func _setting_toggle(parent: Node, key: String, title: String, explanation: String) -> void:
 	var row := _setting_row(parent,title,explanation)
@@ -557,15 +846,15 @@ func _setting_toggle(parent: Node, key: String, title: String, explanation: Stri
 
 func _setting_row(parent: Node, title: String, explanation: String) -> HBoxContainer:
 	var row := _row(parent)
-	row.add_theme_constant_override("separation",32)
+	row.add_theme_constant_override("separation",16)
 	var info := VBoxContainer.new()
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	info.add_theme_constant_override("separation",4)
+	info.add_theme_constant_override("separation",1)
 	row.add_child(info)
-	var heading := _label(title,20)
+	var heading := _label(title,19)
 	heading.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	info.add_child(heading)
-	var description := _label(explanation,17,MUTED)
+	var description := _label(explanation,15,MUTED)
 	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	info.add_child(description)
 	return row
@@ -574,15 +863,20 @@ func _state_switch(parent: Node, id: String, enabled: bool, action: Callable, av
 	var button := CheckButton.new()
 	button.text = "On" if enabled else "Off"
 	button.button_pressed = enabled
-	button.custom_minimum_size = Vector2(132,52)
+	button.custom_minimum_size = Vector2(108,42)
 	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	button.add_theme_font_size_override("font_size",17)
 	button.disabled = not available or backend.busy
 	button.set_meta("focus_id",id)
 	button.tooltip_text = parent.get_child(0).get_child(0).text + (": On" if enabled else ": Off")
+	var accent := MINT if enabled else MUTED
 	for state in ["normal","hover","pressed","hover_pressed","disabled"]:
-		button.add_theme_stylebox_override(state,_style(Color("294436") if enabled else Color("1c303c")))
-	button.add_theme_stylebox_override("focus",_style(Color(0.65,0.94,0.55,0.08),MINT))
-	button.add_theme_color_override("font_color",MINT if enabled else MUTED)
+		button.add_theme_stylebox_override(state,_style(Color(accent.r,accent.g,accent.b,0.16 if enabled else 0.06),Color(0,0,0,0),18,12,4))
+	button.add_theme_stylebox_override("focus",_style(Color(0.72,0.95,0.55,0.10),MINT,18,12,4))
+	button.add_theme_color_override("font_color",accent)
+	button.add_theme_color_override("font_pressed_color",accent)
+	button.add_theme_color_override("font_hover_color",accent)
+	button.add_theme_color_override("font_hover_pressed_color",accent)
 	button.pressed.connect(action)
 	button.focus_entered.connect(func(): last_focus = id)
 	parent.add_child(button)
@@ -639,21 +933,25 @@ func _show_license(third_party: bool) -> void:
 	licenses.get_ok_button().grab_focus()
 
 func _update_status(column: Node) -> void:
-	var engine := _card(column)
-	engine.add_child(_label("Engine  /  " + str(status.get("version","Not connected")),26))
-	var available: String = str(update.get("engine",{}).get("available","Not checked"))
-	_paragraph(engine,"Available version: " + available + "   ·   Steam " + ("is running" if status.get("steam_running",false) else "is not running"))
-	var index := _card(column)
-	index.add_child(_label("Recipe index",23))
+	var top := _row(column)
+	top.add_theme_constant_override("separation",14)
+	var engine := _card(top,"Engine")
+	engine.get_parent().size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	engine.add_child(_label(str(status.get("version","Not connected")),24,INK))
+	var available: String = str(update.get("engine",{}).get("available","not checked"))
+	_paragraph(engine,"Available: " + available + "  ·  Steam " + ("running" if status.get("steam_running",false) else "closed"))
+	var index := _card(top,"Recipes")
+	index.get_parent().size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var raw_fetched = update.get("index",{}).get("fetched_at")
 	var fetched: String = raw_fetched if raw_fetched is String else ""
-	var age := "Not fetched yet. Check for updates to download the recipe index."
+	var age := "Not fetched yet"
 	if not fetched.is_empty():
 		var hours := maxi(0,int((Time.get_unix_time_from_system()-Time.get_unix_time_from_datetime_string(fetched))/3600))
-		age = ("Fetched just now" if hours == 0 else "Fetched %s hour%s ago" % [hours,"" if hours == 1 else "s"]) + "  ·  " + fetched
-	_paragraph(index,age)
-	var proton := _card(column)
-	proton.add_child(_label("Proton builds",23))
+		age = "Fetched just now" if hours == 0 else "Fetched %s hour%s ago" % [hours,"" if hours == 1 else "s"]
+	index.add_child(_label(age,24,INK))
+	_paragraph(index,fetched if not fetched.is_empty() else "Check for updates to download the recipe index.")
+	_chip("Checking…" if update_backend.busy else "Check for updates",_check_updates,index,"check_updates",false,MINT,not update_backend.busy)
+	var proton := _card(column,"Proton builds")
 	for build in proton_data.get("builds",[]):
 		var phase: String = build.get("state","wanted")
 		var message := "Installed" if phase == "installed" else phase.capitalize()
@@ -663,11 +961,12 @@ func _update_status(column: Node) -> void:
 		if not wanted_by.is_empty(): message += "  ·  Wanted by " + ", ".join(wanted_by)
 		if build.get("latest",false): message += "  ·  Newest GE"
 		if build.has("total_bytes"): message += "  ·  %.0f / %.0f MiB" % [float(build.get("downloaded_bytes",0))/1048576,float(build.total_bytes)/1048576]
-		if build.has("installed_bytes"): message += "  ·  %.0f MiB on disk" % (float(build.installed_bytes)/1048576)
-		_paragraph(proton,str(build.name) + "\n" + message)
-		if not build.get("installed",false): _button("Install",_install_proton.bind(str(build.name)),proton,"proton_"+str(build.name),not proton_data.get("active",false) and not proton_backend.busy)
+		if build.has("installed_bytes"): message += "  ·  %.0f MiB" % (float(build.installed_bytes)/1048576)
+		var row := _setting_row(proton,str(build.name),message)
+		if not build.get("installed",false):
+			_chip("Install",_install_proton.bind(str(build.name)),row,"proton_"+str(build.name),false,MINT,not proton_data.get("active",false) and not proton_backend.busy)
 	if proton_data.is_empty(): _paragraph(proton,"Reading installed and wanted builds…")
-	_button("Refresh Proton builds",func(): proton_backend.request("proton"),proton,"proton_refresh",not proton_backend.busy)
+	_chip("Refresh",func(): proton_backend.request("proton"),proton,"proton_refresh",false,MINT,not proton_backend.busy)
 
 func _toggle_game() -> void:
 	if selected.get("kind") == "non_steam": return
@@ -680,6 +979,8 @@ func _toggle_mod(mod: Dictionary) -> void:
 
 func _set_filter(value: int) -> void:
 	filter = value
+	last_focus = "filter%s" % value
+	_save_ui_config()
 	_render()
 
 func _switch_tab(value: int) -> void:
@@ -715,7 +1016,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("dc_left") or event.is_action_pressed("dc_right"): _switch_tab(Nav.next_index(tab,-1 if event.is_action_pressed("dc_left") else 1,3))
 	elif event.is_action_pressed("dc_x"):
 		if detail: _toggle_game()
-		elif tab == 0: _set_filter(Nav.next_index(filter,1,3))
+		elif tab == 0: _set_filter(Nav.next_index(filter,1,FILTERS.size()))
 	elif event.is_action_pressed("dc_y"): _confirm()
 	else: return
 	get_viewport().set_input_as_handled()
