@@ -222,15 +222,38 @@ until a resolved index is fetched). Optional exported UI input: `bin/deckcompani
 the release builder also includes `assets/logo/` and `assets/steam/` when present. The parent supplies
 the PNG icon; no image conversion is performed by the engine.
 
-## Not verified on hardware
+## Tested on hardware
 
-No Steam Deck or remote device was connected. Real SteamOS shutdown/restart,
-Steam mapping/shortcut recognition, GE's protonfixes lifecycle, prefix timing,
-controller UX and game/mod behavior are **not verified on hardware**.
-`last_launch.ok` records preparation, not game success. Symlink redirects from
-Documents outside a prefix are refused and logged. SHA256 trusts the HTTPS index;
-publisher signature verification is designed but not implemented.
+Tested on a Steam Deck (SteamOS 3.9) in Game Mode and Desktop Mode: install while
+Steam runs, Apply with a Steam restart, "all games" takeover and Restore all, Valve
+recommendations, GE-Proton install, FS25 Deck Mode adoption, existing shortcuts,
+the launch splash and the in-app Decky install with the Steam keyboard.
+Game and mod behaviour still depends on each recipe. `last_launch.ok` records
+preparation, not game success. SHA256 trusts the HTTPS index; publisher signature
+verification is designed but not implemented.
 
-Use reviewed recipes/releases, back up saves, apply queued Steam changes through the CLI,
-and try disposable prefixes first. No `sudo`, system partition writes, telemetry,
-credential access or automatic uploads are required.
+DeckCompanion has no telemetry and never uploads anything. It never needs `sudo`,
+with one exception: installing or updating Decky Loader. That asks for your Deck
+password inside the app. The password goes only to `sudo`, is read once from a
+RAM-only file that is deleted immediately, and is never stored or logged.
+
+## Credits
+
+DeckCompanion stands on the work of these projects. Thank you!
+
+| Project | What DeckCompanion uses it for | License |
+| --- | --- | --- |
+| [umu-launcher](https://github.com/Open-Wine-Components/umu-launcher) (Open Wine Components) | Runs non-Steam games and store launchers; downloaded at runtime as a separate program | GPL-3.0 |
+| [umu-protonfixes](https://github.com/Open-Wine-Components/umu-protonfixes) (Open Wine Components) | Community game fixes, run by GE-Proton; generated local fixes build on its API | BSD-2-Clause |
+| [umu-database](https://github.com/Open-Wine-Components/umu-database) | Game ID lookup for non-Steam games; the CSV is downloaded at runtime | GPL-3.0 |
+| [GE-Proton](https://github.com/GloriousEggroll/proton-ge-custom) (GloriousEggroll) | The Proton build for recipes and community fixes; downloaded at runtime | per component (see project) |
+| [Proton](https://github.com/ValveSoftware/Proton) and Steam (Valve) | Compatibility tools, Steam Deck compatibility recommendations | per component (see project) |
+| [ValvePython vdf](https://github.com/ValvePython/vdf) | Reads and writes Steam's VDF files (vendored in `vdf/`) | MIT |
+| [Godot Engine](https://godotengine.org) | The management app and launch splash | MIT |
+| [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) and [decky-installer](https://github.com/SteamDeckHomebrew/decky-installer) (Steam Deck Homebrew) | Optional Quick Access plugin; the official installer is used unchanged | GPL-2.0 |
+| [@decky/ui](https://github.com/SteamDeckHomebrew/decky-frontend-lib), [@decky/api](https://github.com/SteamDeckHomebrew/loader-api), @decky/rollup | Building the Decky plugin | LGPL-2.1 (ui, api), BSD-3-Clause (rollup) |
+| [Inter](https://github.com/rsms/inter) (Rasmus Andersson) | Lettering in the logo and Steam artwork, converted to outlines | OFL-1.1 |
+
+Full license texts and details are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+DeckCompanion itself is MIT. Steam and Steam Deck are trademarks of Valve Corporation;
+DeckCompanion is not affiliated with or endorsed by Valve.
