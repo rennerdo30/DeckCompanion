@@ -14,6 +14,7 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
+	print("Test process PID: ", OS.get_process_id())
 	root.size = Vector2i(1280,800)
 	if "--mutate-navigation" in OS.get_cmdline_user_args():
 		var mutated := GDScript.new()
@@ -45,7 +46,7 @@ func run() -> void:
 	check(backend.mock_response("enable",["2300320"]).pending == "enable","enable stages pending change")
 	check(not backend.mock_response("game",["2300320"]).enabled,"staging does not apply")
 	backend.mock_response("mod",["2300320","FS25_DeckMode","--off"])
-	check(not backend.games[0].mods[0].enabled,"mod toggle stages")
+	check(not backend.games[0].mods[0].enabled,"mod preference saves")
 	check(backend.mock_response("status").pending.size() == 2,"pending games counted once")
 	check(backend.mock_response("apply",["--restart-steam"]).steam_restarted,"mock apply response")
 	check(backend.games[0].enabled and backend.games[0].pending == null,"apply commits staged state")
@@ -79,6 +80,7 @@ func run() -> void:
 	root.add_child(ui)
 	await create_timer(0.5).timeout
 	check(ui.games.size() == 4,"main scene loads fixture library asynchronously")
+	await ui_032(ui)
 	# Steam Input's virtual gamepad on the Deck is not device 0.
 	for spec in [[JOY_BUTTON_A,"ui_accept"],[JOY_BUTTON_B,"ui_cancel"],[JOY_BUTTON_X,"dc_x"],[JOY_BUTTON_DPAD_DOWN,"ui_down"]]:
 		var press := InputEventJoypadButton.new()
@@ -141,3 +143,157 @@ func run() -> void:
 	await process_frame
 	print("RESULT: %s/%s checks passed" % [checks-failures,checks])
 	quit(0 if failures == 0 else 1)
+
+func control(ui: Node, id: String) -> Control:
+	for item in ui.controls:
+		if item.get_meta("focus_id", "") == id: return item
+	return null
+
+func ui_032(ui: Node) -> void:
+	var modern := false
+	for property in ui.get_property_list():
+		if property.name == "preview_fields": modern = true
+	check(modern,"library exposes a live game preview")
+	if modern:
+		var first: Control = control(ui,"2300320")
+		first.grab_focus()
+		await process_frame
+		check(ui.preview_fields.name.text == ui.games[0].name,"preview follows first game focus")
+		var panel: Node = ui.preview
+		var banner: Node = ui.preview_art
+		var press := InputEventJoypadButton.new()
+		press.device = 1
+		press.button_index = JOY_BUTTON_DPAD_DOWN
+		press.pressed = true
+		Input.parse_input_event(press)
+		await process_frame
+		await process_frame
+		press.pressed = false
+		Input.parse_input_event(press)
+		check(ui.preview_fields.name.text == ui.games[1].name,"D-pad moves preview to next game without opening detail")
+		check(ui.preview == panel and ui.preview_art == banner and not ui.detail,"focus changes retain panel and artwork nodes without flicker")
+		control(ui,"480").grab_focus()
+		await process_frame
+		check(ui.preview_art.fallback and ui.preview_art.texture.texture == null,"null art uses generated fallback and clears previous image")
+		check(ui.preview_fields.fix.text == "No recipe — Steam launches it normally","preview explains no-recipe behavior")
+		control(ui,"2300320").grab_focus()
+		for i in 100:
+			await process_frame
+			if not ui.art_cache.worker: break
+		check(not ui.preview_art.fallback,"local fixture artwork completes asynchronously")
+		check(ui.preview_fields.proton.text.contains("GE-Proton11-7-x86_64") and ui.preview_fields.proton.text.contains("fallback"),"preview shows selected Proton and reason")
+		check(ui.preview_fields.launch.text.contains("2026-10-31") and ui.preview_fields.launch.text.contains("handoff"),"preview shows last launch handoff and time honestly")
+		check(ui.preview_fields.note.text == ui.games[0].notes.get_slice("\n",0),"preview shows first line of notes")
+		# Complete an obsolete image request after selecting another game.
+		var old_key: String = ui.preview_art.key
+		var old_texture: Texture2D = ui.preview_art.texture.texture
+		control(ui,"480").grab_focus()
+		ui.art_cache.loaded.emit(old_key,old_texture)
+		check(ui.preview_art.fallback and ui.preview_art.texture.texture == null,"late artwork cannot replace the focused game's fallback")
+		# Missing hero falls through to header, then portrait on the worker.
+		var fixture_path: String = ui.games[0].art.hero
+		for kind in ["header","portrait"]:
+			var candidate := {"appid":"test-"+kind,"art":{"hero":"res://missing-art.png",kind:fixture_path}}
+			ui.preview_art.show_game(candidate)
+			for i in 100:
+				await process_frame
+				if not ui.art_cache.worker: break
+			check(not ui.preview_art.fallback,"art loads " + kind + " when preferred hero is missing")
+		for i in 10:
+			var candidates: Array[String] = ["res://missing-%s.png" % i]
+			ui.art_cache.request(candidates)
+			while ui.art_cache.worker: await process_frame
+		check(ui.art_cache.textures.size() <= 8,"art cache stays bounded including failed paths")
+		var without_notes: Dictionary = ui.games[0].duplicate(true)
+		without_notes.erase("notes")
+		var saved_notes: Array = ui.games.duplicate(true)
+		ui.games[0] = without_notes
+		ui._render()
+		control(ui,"2300320").grab_focus()
+		check(ui.preview_backend.busy and not ui.backend.busy and not control(ui,"480").disabled,"missing list notes load on an independent worker without blocking input")
+		control(ui,"480").grab_focus()
+		await create_timer(0.25).timeout
+		check(ui.preview_fields.name.text == ui.games[2].name and ui.preview_fields.note.text == ui.games[2].notes.get_slice("\n",0),"late recipe notes cannot replace a different focused game")
+		control(ui,"2300320").grab_focus()
+		check(ui.preview_fields.note.text == saved_notes[0].notes.get_slice("\n",0),"old-engine list without notes uses cached game detail")
+		ui.games = saved_notes
+	# Exercise real detail buttons, not only the formatting helper.
+	ui._open_game(ui.games[0])
+	await create_timer(0.25).timeout
+	var original: Dictionary = ui.selected.duplicate(true)
+	var mod: Dictionary = original.mods[0].duplicate(true)
+	mod.installed_version = "0.7.0"
+	for state in ["installed","will_install_on_launch","update_available","off","blocked"]:
+		mod.state = state
+		mod.enabled = state != "off"
+		mod.state_message = "Game is running"
+		ui.selected.mods = [mod.duplicate(true)]
+		ui._render()
+		var row: Button = control(ui,"mod"+mod.id)
+		var expected: String = {"installed":"Installed v0.7.0","will_install_on_launch":"Will install on next launch","update_available":"Update available","off":"Off","blocked":"Blocked: Game is running"}[state]
+		check(row.text.begins_with("[On]" if mod.enabled else "[Off]") and row.text.contains(expected) and not row.text.contains("✓"),"mod row separates preference and " + state)
+	# Legacy objects lack all added fields and still render in both screens.
+	var legacy: Dictionary = original.duplicate(true)
+	legacy.erase("art")
+	legacy.erase("proton")
+	legacy.mods[0].erase("state")
+	legacy.mods[0].erase("state_message")
+	for installed in [null,"0.7.0","0.6.0"]:
+		legacy.mods[0].installed_version = installed
+		ui.selected = legacy
+		ui._render()
+		var row: Button = control(ui,"mod"+mod.id)
+		check(row.text.contains("Will install on next launch" if installed == null else ("Installed v0.7.0" if installed == "0.7.0" else "Update available")),"legacy mod state from installed_version " + str(installed))
+	check(not Backend.parse_response(JSON.stringify(legacy),0,"game").has("error"),"legacy game object remains accepted")
+	legacy.mods[0].version = "unresolved"
+	legacy.mods[0].installed_version = "0.7.0"
+	ui.selected = legacy
+	ui._render()
+	check(control(ui,"mod"+mod.id).text.contains("Installed v0.7.0") and not control(ui,"mod"+mod.id).text.contains("Update available"),"legacy unresolved version does not invent a mod update")
+	ui.games[0] = legacy
+	ui._back()
+	await process_frame
+	if modern:
+		check(ui.preview_art.fallback and ui.preview_fields.proton.text.contains("Not reported"),"legacy library renders missing art and Proton safely")
+		legacy.art = null
+		legacy.proton = null
+		ui.preview_id = ""
+		ui._focus_game(legacy)
+		check(ui.preview_art.fallback and ui.preview_fields.proton.text.contains("Not reported"),"explicit null artwork and Proton render safely")
+		for value in ["enable","disable",null]:
+			legacy.pending = value
+			ui.preview_id = ""
+			ui._focus_game(legacy)
+			check(ui.preview_fields.fix.text == ("Pending "+value if value != null else "Fix available"),"preview fix state " + str(value))
+	# A mod mutation alone must not introduce a pending Steam change.
+	var backend := Backend.new()
+	root.add_child(backend)
+	backend.mock = true
+	var before: Array = backend.mock_response("status").pending
+	var toggled: Dictionary = backend.mock_response("mod",["2300320","FS25_DeckMode","--off"])
+	check(backend.mock_response("status").pending == before,"mod preference never creates pending Steam changes")
+	check(toggled.get("mod_result") is Dictionary and not toggled.get("mod_result",{}).get("message", "").is_empty(),"mock mod mutation returns player-facing mod_result")
+	ui.detail = true
+	for message in ["Deck Mode installed now.",null]:
+		var response: Dictionary = original.duplicate(true)
+		if message != null: response.mod_result = {"changed_now":true,"message":message}
+		ui._completed("mod",response)
+		await create_timer(0.25).timeout
+		check(ui.notice == (message if message != null else "Saved. Takes effect on next launch."),"mod toggle chooses engine message or legacy fallback " + str(message))
+	ui._completed("enable",original.duplicate(true))
+	await create_timer(0.25).timeout
+	check(ui.notice.contains("Apply when"),"enable keeps Steam Apply wording")
+	ui._completed("disable",original.duplicate(true))
+	await create_timer(0.25).timeout
+	check(ui.notice.contains("Apply when"),"disable keeps Steam Apply wording")
+	ui._completed("default",ui.status.duplicate(true))
+	check(ui.notice.contains("Apply when"),"default keeps Steam Apply wording")
+	# Restore baseline state for the pre-existing UI checks.
+	ui.games = Backend.fixture("games").games
+	ui.selected = original
+	ui.detail = false
+	ui.notice = ""
+	ui.last_focus = "games"
+	ui._render()
+	await process_frame
+	backend.queue_free()

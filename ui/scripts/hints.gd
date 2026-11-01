@@ -1,12 +1,13 @@
 extends Control
 var keyboard := false
 var detail := false
+var library_preview := false
 
 func _draw() -> void:
 	var font := ThemeDB.fallback_font
 	var keys := ["Enter", "Esc", "X", "Y", "Q / E", "PgUp/Dn"] if keyboard else ["A", "B", "X", "Y", "LB / RB", "R"]
-	var labels := ["Select", "Back", "Toggle" if detail else "Filter", "Apply", "Tabs", "Scroll log"]
-	if not detail:
+	var labels := ["Select", "Back", "Toggle" if detail else "Filter", "Apply", "Tabs", "Scroll log" if detail else "Scroll preview"]
+	if not detail and not library_preview:
 		keys.resize(5)
 		labels.resize(5)
 	var x := 0.0
