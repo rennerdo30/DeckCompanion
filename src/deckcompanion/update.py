@@ -134,5 +134,7 @@ def update(paths):
             except Error as exc:
                 if exc.code not in ("network_timeout", "download_failed"):
                     raise
+    from . import proton
     return {"engine": {"current": current(paths), "available": available, "updated": updated},
-            "index": {"updated": fetched, "fetched_at": index.get("fetched_at") if index else None}}
+            "index": {"updated": fetched, "fetched_at": index.get("fetched_at") if index else None},
+            "proton": proton.sync(paths)}

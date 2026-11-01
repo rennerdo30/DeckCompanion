@@ -209,9 +209,11 @@ def test_launch_timeout_uses_installed_and_cached_mod(paths, tmp_path, monkeypat
     assert args == [str(proton / "proton"), "waitforexitandrun", "game.exe", "argument with spaces", "$literal", "--deck"]
     assert env["CUSTOM"] == "value"
     assert (prefix / "pfx/mods/m.zip").read_bytes() == b"mod data"
-    assert len(calls) == 1
+    assert calls == []  # Runtime downloads now belong exclusively to update/install.
     assert state(paths)["games"]["42"]["last_launch"]["ok"] is True
-    assert "fake HTTP timeout" in (paths.data / "logs/42-last.log").read_text()
+    log = (paths.data / "logs/42-last.log").read_text()
+    assert "Using installed GE-Proton10-9 (requested GE-Proton11-11)" in log
+    assert "fake HTTP timeout" not in log
 
 
 def test_first_launch_defers_content_and_exec_failure_marks_status(paths, tmp_path, monkeypatch):
@@ -229,7 +231,7 @@ def test_first_launch_defers_content_and_exec_failure_marks_status(paths, tmp_pa
     assert state(paths)["games"]["42"]["last_launch"]["ok"] is False
 
 
-def test_archive_traversal_and_cached_proton_install(paths, tmp_path):
+def test_archive_traversal_and_launch_does_not_install_cached_proton(paths, tmp_path):
     stream = io.BytesIO()
     with tarfile.open(fileobj=stream, mode="w:gz") as out:
         info = tarfile.TarInfo("GE-Proton11-11/proton")
@@ -237,7 +239,9 @@ def test_archive_traversal_and_cached_proton_install(paths, tmp_path):
         out.addfile(info, io.BytesIO(b"fake"))
     sha = payload(paths, stream.getvalue())
     runtime = {"proton": "GE-Proton11-11", "url": "https://example.org/p.tar.gz", "sha256": sha}
-    assert launch.resolve_proton(paths, {"runtime": runtime}, net.Budget(), lambda x: None) == paths.tools / "GE-Proton11-11"
+    with pytest.raises(Error, match="No installed Proton"):
+        launch.resolve_proton(paths, {"runtime": runtime}, net.Budget(), lambda x: None)
+    assert not (paths.tools / "GE-Proton11-11").exists()
     stream = io.BytesIO()
     with tarfile.open(fileobj=stream, mode="w") as out:
         info = tarfile.TarInfo("../escaped")

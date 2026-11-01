@@ -43,11 +43,11 @@ contract too. `--help` is the human help exception. No progress messages on stdo
   or `{"action":"default_off"}` without an appid for a queued global change.
   `last_apply` is null before a helper run, then the content of `logs/apply-last.json`.
 
-- `settings --json` -> `{"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true}`.
+- `settings --json` -> `{"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true,"auto_install_ge":true,"cleanup_old_ge":true}`.
   Returns all persisted settings plus defaults; reading does not write the state file.
   `settings --set key=value [--set key=value ...] --json` validates all entries before
-  saving. Boolean keys `splash`, `show_games_without_recipe` and
-  `check_updates_on_start` accept true/false or on/off; all default on. Numeric
+  saving. Boolean keys `splash`, `show_games_without_recipe`,
+  `check_updates_on_start`, `auto_install_ge` and `cleanup_old_ge` accept true/false or on/off; all default on. Numeric
   `splash_seconds` defaults to 4 and clamps finite numbers to 1–10. Unknown keys,
   malformed entries, invalid booleans and nonfinite numbers fail without partial writes.
   `settings --splash on|off --splash-seconds N --json` updates either or both values
@@ -56,7 +56,7 @@ contract too. `--help` is the human help exception. No progress messages on stdo
   the next game launch and need no Steam restart. Nonfinite values are rejected.
   Splash flags are aliases and take precedence over `--set` for the same key.
   Library visibility and automatic update checks are UI preferences; the UI runs
-  `update` on an independent background worker once on open when enabled. Global
+  `update --detach` once on open when enabled. Global
   default-tool selection retains its separate `default --on|--off` / Apply contract.
   `status.install_path` identifies the data/install root for the Settings About card.
 
@@ -132,8 +132,7 @@ null so the UI can use its own fallback. No artwork is downloaded.
 `name` and `reason`: `pinned` for an installed exact recipe pin, `recipe_fallback`
 for the recipe's installed GE/newest fallback, or `newest` without a recipe.
 This uses launch's installed-build selector without downloads, extraction, logs,
-or state changes. A subsequent successful optional pin download at launch can
-supersede the displayed installed fallback.
+or state changes. Launch never downloads a Proton runtime; use update or install.
 
 Each mod keeps `enabled` (wanted) and `installed_version` and adds `state` and
 `state_message`. The state is one of:
@@ -206,7 +205,7 @@ all Steam libraries. A `proton` script must exist. Runtime/DeckCompanion/other
 non-Proton folders are excluded. Symlink aliases resolve to one target.
 `GE-Proton11-11` ranks as (11,11), `UMU-Proton-10.0-4` as (10,0,4),
 `Proton 10.0` as (10,0). Experimental ranks as the newest installed Valve major
-plus 0.5; GE wins ties. Recipe pins retain their download/installed fallback
+plus 0.5; GE wins ties. Recipe pins retain their installed fallback
 (prefer installed GE, otherwise the newest available Proton).
 The selected runtime is logged.
 
@@ -219,7 +218,7 @@ Missing/corrupt optional content logs a warning and uses installed content. All
 launch network requests share a two-second wall budget, implemented in an owned
 worker subprocess so DNS and slow bodies are bounded too. No index/latest API
 requests at launch. Hash-verified cached mods work offline. Install a runtime in
-advance for large GE archives; a two-second launch budget rarely accommodates one.
+advance for GE archives; runtime downloads never run on the launch path.
 
 Localfixes call upstream `early()` and `main()` from the running protonfixes package
 before our additions. Wine installs/registry steps use `@util.once(retry=True)`;
@@ -266,6 +265,26 @@ zero Wine steps. This is a preparation summary, not a game-success receipt.
 Not verified on hardware: Game Mode focus, gamescope window stacking and timing.
 
 ## Update and rollback (slice 3a)
+
+`proton --json` is a local-only read returning `{builds:[...],active,job,status_file}`.
+Each row has `name`, `state`, `installed`, optional `path`, `wanted_by` (recipe names),
+`latest`, `installed_bytes`, and progress fields `percent`, `downloaded_bytes`,
+`total_bytes` or `error`. States: wanted, scheduled, downloading, verifying,
+unpacking, installed, failed. Latest is unknown until metadata has been fetched.
+
+`proton install NAME --json` downloads, verifies and installs a versioned GE build.
+`--detach` submits a bounded Linux user service and returns
+`{scheduled:true,active:true,status_file:".../proton-job.json"}` immediately.
+Poll `proton --json`; atomic per-build receipts are in `proton-status/NAME.json`.
+The job file holds active state, PID once started, completion result or failure.
+Scheduling does not confirm installation. Retry resumes interrupted partial files.
+Only one install/update worker runs; polling and settings remain available.
+
+`update --detach --json` schedules engine/index and GE updates through the same
+worker. Its final result is in `job.result`, including `engine`, `index` and `proton`.
+Synchronous `update --json` adds `proton` with builds, removed names and errors.
+GE failures are reported in `proton.errors` and the job receipt without discarding
+a successful engine/index update. See [updates.md](updates.md) for budgets/cleanup.
 
 `update --json` -> `{"engine":{"current":"0.3.2","available":"0.3.2","updated":false},"index":{"updated":false,"fetched_at":null}}`.
 `fetched_at` is an ISO8601 string after the first successful fetch; null if none.

@@ -8,7 +8,9 @@ var default_tool := false
 var default_pending = null
 var worker: Thread
 var active := ""
-var settings := {"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true}
+var settings := {"splash":true,"splash_seconds":4.0,"show_games_without_recipe":true,"check_updates_on_start":true,"auto_install_ge":true,"cleanup_old_ge":true}
+var proton_builds: Array = [{"name":"GE-Proton11-11","state":"wanted","installed":false,"wanted_by":["Farming Simulator 25"],"latest":true}]
+var proton_ticks := 0
 
 func _ready() -> void:
 	mock = "--mock" in OS.get_cmdline_user_args() or OS.get_environment("DECKCOMPANION_UI_MOCK") == "1"
@@ -41,6 +43,11 @@ static func parse_response(raw: String, exit_code: int, command: String) -> Dict
 	if exit_code != 0: return failure("COMMAND_FAILED", "The engine exited with code %s. Refresh before trying again." % exit_code)
 	var valid := true
 	match command:
+		"proton":
+			valid = data.get("active") is bool and (data.get("scheduled",false) or data.get("builds") is Array)
+			if valid and data.has("builds"):
+				for build in data.builds:
+					if not build is Dictionary or not build.get("name") is String or not build.get("state") is String: valid = false
 		"settings": valid = data.get("splash") is bool and (data.get("splash_seconds") is float or data.get("splash_seconds") is int) and data.splash_seconds >= 1 and data.splash_seconds <= 10 and data.get("show_games_without_recipe") is bool and data.get("check_updates_on_start") is bool
 		"games":
 			valid = data.get("games") is Array
@@ -58,7 +65,7 @@ static func parse_response(raw: String, exit_code: int, command: String) -> Dict
 			if valid:
 				for build in data.proton:
 					if not build is Dictionary or not build.get("name") is String or not build.get("path") is String: valid = false
-		"update": valid = data.get("engine") is Dictionary and data.get("index") is Dictionary and data.engine.get("current") is String and data.engine.get("available") is String and (data.index.get("fetched_at") is String or data.index.get("fetched_at") == null)
+		"update": valid = data.get("scheduled",false) or (data.get("engine") is Dictionary and data.get("index") is Dictionary and data.engine.get("current") is String and data.engine.get("available") is String and (data.index.get("fetched_at") is String or data.index.get("fetched_at") == null))
 		"apply": valid = data.get("applied") is Array and data.get("steam_restarted") is bool
 	return data if valid else failure("INVALID_RESPONSE", "The engine response is missing required fields. Please update the engine and UI together.")
 
@@ -126,6 +133,21 @@ func _mock_later(command: String, args: Array) -> void:
 	_finish(mock_response(command, args))
 
 func mock_response(command: String, args: Array = []) -> Dictionary:
+	if command == "proton":
+		if not args.is_empty() and args[0] == "install":
+			proton_ticks = 1
+			return {"scheduled":true,"active":true}
+		if proton_ticks > 0:
+			proton_ticks += 1
+			var build: Dictionary = proton_builds[0]
+			build.state = "failed" if scenario == "download_failed" else ("installed" if proton_ticks >= 4 else "downloading")
+			build.percent = 42 if proton_ticks == 2 else 85
+			build.total_bytes = 564789552
+			build.downloaded_bytes = int(build.total_bytes * build.percent / 100)
+			build.installed = build.state == "installed"
+			if build.state == "failed": build.error = "Not enough free disk space"
+			if build.state in ["installed","failed"]: proton_ticks = 0
+		return {"builds":proton_builds.duplicate(true),"active":proton_ticks > 0,"job":{}}
 	if command == "settings":
 		for i in args.size():
 			if args[i] == "--splash": settings.splash = args[i+1] == "on"

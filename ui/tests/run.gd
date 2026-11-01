@@ -86,6 +86,7 @@ func run() -> void:
 	await settings_checks(ui)
 	await load("res://tests/layout_polish.gd").new().run(self,ui)
 	await load("res://tests/splash_hold.gd").new().run(self)
+	await ge_checks(ui)
 	await touch_checks(ui)
 	# Steam Input's virtual gamepad on the Deck is not device 0.
 	for spec in [[JOY_BUTTON_A,"ui_accept"],[JOY_BUTTON_B,"ui_cancel"],[JOY_BUTTON_X,"dc_x"],[JOY_BUTTON_DPAD_DOWN,"ui_down"]]:
@@ -535,3 +536,43 @@ func ui_032(ui: Node) -> void:
 	ui._render()
 	await process_frame
 	backend.queue_free()
+
+func ge_checks(ui: Node) -> void:
+	ui._switch_tab(2)
+	check(control(ui,"auto_install_ge") != null and control(ui,"cleanup_old_ge") != null,"GE settings toggles exist")
+	if control(ui,"auto_install_ge") == null: return
+	control(ui,"auto_install_ge").pressed.emit()
+	await create_timer(0.25).timeout
+	check(not ui.settings.auto_install_ge,"GE auto-install setting saves through existing settings command")
+	control(ui,"cleanup_old_ge").pressed.emit()
+	await create_timer(0.25).timeout
+	check(not ui.settings.cleanup_old_ge,"GE cleanup setting saves independently")
+	check(Backend.parse_response('{"active":false,"builds":[null]}',0,"proton").has("error"),"malformed build rejected")
+	check(not Backend.parse_response('{"active":true,"scheduled":true}',0,"update").has("error"),"detached update acknowledgement accepted")
+	ui._switch_tab(1)
+	await create_timer(0.3).timeout
+	var install := control(ui,"proton_GE-Proton11-11")
+	check(install != null,"wanted build has Install action")
+	if install == null: return
+	install.pressed.emit()
+	await create_timer(0.25).timeout
+	check(ui.proton_data.active and not ui.backend.busy,"install scheduled independently of library backend")
+	ui.proton_backend.request("proton")
+	await create_timer(0.25).timeout
+	check(ui.proton_data.builds[0].state == "downloading" and ui.proton_data.builds[0].percent >= 42,"poll exposes download percentage")
+	check(ui.body.find_children("*","Button",true,false).any(func(b): return b.get_meta("focus_id","") == "proton_GE-Proton11-11" and b.disabled),"active download blocks duplicate install")
+	ui.proton_backend.request("proton")
+	await create_timer(0.25).timeout
+	ui.proton_backend.request("proton")
+	await create_timer(0.25).timeout
+	check(ui.proton_data.builds[0].state == "installed" and not ui.proton_data.active,"poll reaches installed state")
+	check(control(ui,"proton_GE-Proton11-11") == null,"installed build no longer offers install")
+	ui.proton_backend.scenario = "download_failed"
+	ui._install_proton("GE-Proton11-11")
+	await create_timer(0.25).timeout
+	ui.proton_backend.request("proton")
+	await create_timer(0.25).timeout
+	check(ui.proton_data.builds[0].state == "failed" and ui.proton_data.builds[0].error.contains("disk"),"poll preserves actionable failure reason")
+	check(control(ui,"proton_GE-Proton11-11") != null,"failed build offers retry")
+	ui.proton_backend.scenario = ""
+	ui._switch_tab(0)

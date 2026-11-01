@@ -65,6 +65,16 @@ def parser():
     helper = commands.add_parser("apply-helper", help="internal detached Steam apply worker")
     helper.add_argument("--json", action="store_true")
     helper.add_argument("--game-mode", action="store_true")
+    commands.choices["update"].add_argument("--detach", action="store_true")
+    proton = commands.add_parser("proton")
+    proton.add_argument("action", nargs="?", choices=("install",))
+    proton.add_argument("name", nargs="?")
+    proton.add_argument("--json", action="store_true")
+    proton.add_argument("--detach", action="store_true")
+    worker = commands.add_parser("proton-helper", help=argparse.SUPPRESS)
+    worker.add_argument("task", choices=("install", "update"))
+    worker.add_argument("name", nargs="?")
+    worker.add_argument("--json", action="store_true")
     for name in ("install", "uninstall"):
         sub = commands.add_parser(name)
         sub.add_argument("--json", action="store_true")
@@ -76,6 +86,20 @@ def parser():
 
 def execute(args, paths):
     name = args.command
+    if name in ("proton", "proton-helper"):
+        from . import proton
+        if name == "proton-helper":
+            return proton.run(paths, args.task, args.name)
+        if not args.action:
+            if args.name or args.detach:
+                raise Error("invalid_arguments", "Use proton install <name> --detach")
+            return proton.listing(paths)
+        if not args.name:
+            raise Error("invalid_arguments", "proton install requires a build name")
+        return (proton.schedule if args.detach else proton.run)(paths, "install", args.name)
+    if name == "update":
+        from . import proton
+        return (proton.schedule if args.detach else proton.run)(paths, "update")
     data = state(paths)
     if name == "settings":
         from .splash import DEFAULTS, MAX_SECONDS, settings
@@ -181,6 +205,8 @@ def main(argv=None):
             # Never hold state.lock while starting a helper which will need it.
             from .apply_helper import schedule
             result = schedule(paths)
+        elif args.command in ("proton", "proton-helper", "update"):
+            result = execute(args, paths)
         else:
             with locked(paths):
                 result = execute(args, paths)
