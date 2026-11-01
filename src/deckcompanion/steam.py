@@ -222,6 +222,33 @@ def shortcut_path(paths):
     return paths.steam / "userdata" / user / "config/shortcuts.vdf"
 
 
+_LAST_PLAYED = {}
+
+
+def last_played(paths):
+    """Steam's LastPlayed (Unix time) per appid from the current account's localconfig.vdf."""
+    try:
+        path = shortcut_path(paths).parent / "localconfig.vdf"
+        key = (str(path), path.stat().st_mtime_ns)
+    except (Error, OSError):
+        return {}
+    if key not in _LAST_PLAYED:
+        try:
+            node = read_vdf(path)
+            for name in ("UserLocalConfigStore", "Software", "Valve", "Steam", "apps"):
+                node = next((v for k, v in node.items() if k.lower() == name.lower()), {})
+            result = {}
+            for appid, app in node.items():
+                value = next((v for k, v in app.items() if k.lower() == "lastplayed"), None) if isinstance(app, dict) else None
+                if str(appid).isdigit() and str(value).isdigit() and int(value) > 0:
+                    result[str(appid)] = int(value)
+        except Exception:
+            result = {}  # A broken localconfig only loses the sort order.
+        _LAST_PLAYED.clear()
+        _LAST_PLAYED[key] = result
+    return _LAST_PLAYED[key]
+
+
 def shortcut_identity(paths):
     exe = '"' + str(paths.data / "bin/deckcompanion-ui") + '"'
     unsigned = zlib.crc32((exe + "DeckCompanion").encode()) | 0x80000000

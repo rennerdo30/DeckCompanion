@@ -34,6 +34,7 @@ def game(paths, ident):
             "has_recipe": recipe is not None, "enabled": saved.get("enabled", False),
             "pending": saved.get("pending"), "recipe_version": recipe["version"] if recipe else None,
             "mods": mods, "last_launch": saved.get("last_launch"), "art": steam.artwork(paths, ident),
+            "last_played": steam.last_played(paths).get(ident),
             "proton": {"name": selected["name"], "reason": reason} if selected else None}
 
 

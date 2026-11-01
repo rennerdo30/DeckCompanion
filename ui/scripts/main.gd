@@ -346,7 +346,7 @@ func _games_screen() -> void:
 	for i in 3:
 		_button((["All games","Has fix","Enabled"][i]) + ("  ✓" if filter == i else ""),_set_filter.bind(i),filters,"filter%s" % i)
 	var library := games if settings.get("show_games_without_recipe",true) else games.filter(func(game): return game.has_recipe or game.get("kind") == "non_steam")
-	var visible := Nav.visible_games(library,filter)
+	var visible := Nav.sort_games(Nav.visible_games(library,filter))
 	var split := _row(body)
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var scroll := DragScroll.new()

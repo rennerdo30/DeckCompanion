@@ -70,8 +70,17 @@ func run() -> void:
 		root.add_child(button)
 		buttons.append(button)
 	Nav.wire(buttons)
-	check(buttons[0].get_node(buttons[0].focus_neighbor_top) == buttons[2],"actual focus path wraps up")
-	check(buttons[2].get_node(buttons[2].focus_neighbor_bottom) == buttons[0],"actual focus path wraps down")
+	check(buttons[0].get_node(buttons[0].focus_previous) == buttons[2],"tab order wraps backwards")
+	check(buttons[2].get_node(buttons[2].focus_next) == buttons[0],"tab order wraps forwards")
+	# D-pad down must go to the control below, not the next one in list order (owner, Deck).
+	buttons[0].position = Vector2(0,0); buttons[0].size = Vector2(200,40)
+	buttons[1].position = Vector2(300,0); buttons[1].size = Vector2(200,40)
+	buttons[2].position = Vector2(0,100); buttons[2].size = Vector2(200,40)
+	check(buttons[0].focus_neighbor_bottom.is_empty(),"no forced down neighbour")
+	check(buttons[0].find_valid_focus_neighbor(SIDE_BOTTOM) == buttons[2],"down moves to the control below")
+	check(buttons[0].find_valid_focus_neighbor(SIDE_RIGHT) == buttons[1],"right moves to the control beside")
+	var unsorted := [{"name":"b game","last_played":null},{"name":"Zeta","last_played":100},{"name":"a game"},{"name":"Alpha","last_played":300}]
+	check(Nav.sort_games(unsorted).map(func(g): return g.name) == ["Alpha","Zeta","a game","b game"],"library sorted by last played, then name")
 	check(backend.request("games"),"async request accepted")
 	check(not backend.request("apply"),"duplicate command rejected while busy")
 	await create_timer(0.25).timeout
