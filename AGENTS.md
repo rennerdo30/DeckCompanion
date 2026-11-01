@@ -50,3 +50,13 @@ The UI runs on a 7-inch 1280x800 screen held at arm's length. Every screen must 
 - Mock screenshots at 1280x800 and 1920x1080.
 - Whenever the Deck is available, a real Game Mode screenshot (`gamescopectl screenshot`) checked for readability.
 - A UI change that shrinks text or targets below these minimums is a defect.
+
+## Modules update independently (owner, 2026-11-01)
+
+The owner does not want DeckCompanion releases just to update its modules. Everything below has its own update channel, checked by `update` in the background (and never in the launch path):
+- **Recipes and the launcher catalog** are data in a separate content index, not engine code or engine release assets.
+- **Mods** resolve their newest release from the mod's own source with a verified SHA256 (a recipe may still pin a version on purpose).
+- **Proton builds and the umu-launcher runtime** track their upstream releases.
+- **The Decky plugin** has its own version and release asset.
+
+An engine release is only needed for engine code changes. Adding a hard-coded list, a build-time pin or a release-coupled asset for any of these is a defect.
