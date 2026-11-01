@@ -127,7 +127,26 @@ def prepare(paths, verb, command, env=None):
     return args or [str(proton / "proton"), verb, *command], env
 
 
+def native(command):
+    """True when Steam hands us a Linux program (ELF or script), e.g. a non-Steam shortcut.
+
+    As Steam's default compatibility tool we also receive native shortcuts such as
+    DeckCompanion's own UI or emulators; Proton cannot run those (hardware check 2026-11-01).
+    """
+    try:
+        with open(command[0], "rb") as source:
+            head = source.read(4)
+    except (OSError, IndexError, TypeError):
+        return False
+    return head == b"\x7fELF" or head.startswith(b"#!")
+
+
 def launch(paths, verb, command):
+    if native(command):
+        if verb not in ("run", "waitforexitandrun"):
+            return  # Prefix queries such as getcompatpath mean nothing for a native program.
+        os.execv(command[0], command)
+        return
     args, env = prepare(paths, verb, command)
     try:
         os.execve(args[0], args, env)

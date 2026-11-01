@@ -117,12 +117,16 @@ def proton(paths, log=lambda message: None):
         except Exception as exc:
             log(f"Proton discovery skipped {root}: {exc}")
     def version(item):
-        return tuple(int(n) for n in re.findall(r"\d+", item["name"]))
+        # "GE-Proton11-7-x86_64": the architecture suffix is not part of the version.
+        name = re.sub(r"[-_ ]?(x86_64|amd64|x64)$", "", item["name"], flags=re.I)
+        return tuple(int(n) for n in re.findall(r"\d+", name))
     valve_major = max((version(p)[0] for p in found.values()
                        if p["name"].startswith("Proton ") and version(p)), default=0)
     def key(item):
         name = item["name"]
-        numbers = (valve_major + 0.5,) if name == "Proton - Experimental" else version(item)
+        # Experimental is newer than the stable Valve release of its major, but a GE
+        # build of the same major (e.g. GE-Proton11-7) still wins: it carries protonfixes.
+        numbers = (valve_major, 0.5) if name == "Proton - Experimental" else version(item)
         # Zero padding makes 10, 10.0 and 10.0.0 ties; GE wins equal versions.
         return (numbers + (0,) * max(0, 8 - len(numbers)),
                 name.startswith(("GE-Proton", "Proton-GE")), name)

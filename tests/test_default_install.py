@@ -99,7 +99,7 @@ def test_default_preserves_foreign_change_and_rolls_back(paths, monkeypatch, cap
 
 
 def test_installed_proton_version_order(paths):
-    for name in ("GE-Proton9-99", "UMU-Proton-10.0-4", "GE-Proton10-0", "GE-Proton11-11",
+    for name in ("GE-Proton9-99", "UMU-Proton-10.0-4", "GE-Proton10-0", "GE-Proton11-11", "GE-Proton11-7-x86_64",
                  "DeckCompanion", "SteamLinuxRuntime_sniper", "LegacyRuntime", "OtherTool99"):
         atomic(paths.tools / name / "proton", "fake")
     for name in ("Proton 10.0", "Proton 11.0", "Proton - Experimental", "Proton 12.0"):
@@ -108,7 +108,7 @@ def test_installed_proton_version_order(paths):
         else:
             (paths.steam / "steamapps/common" / name).mkdir()
     assert [p["name"] for p in steam.proton(paths)] == [
-        "Proton - Experimental", "GE-Proton11-11", "Proton 11.0", "UMU-Proton-10.0-4",
+        "GE-Proton11-11", "GE-Proton11-7-x86_64", "Proton - Experimental", "Proton 11.0", "UMU-Proton-10.0-4",
         "GE-Proton10-0", "Proton 10.0", "GE-Proton9-99"]
 
 
@@ -312,3 +312,21 @@ def test_piped_shell_uses_bootstrap_even_inside_a_checkout(tmp_path):
     assert (tmp_path / "args.txt").read_text().strip() == "-"
     assert "urllib.request" in (tmp_path / "bootstrap.py").read_text()
     assert b"Apply now" not in out
+
+
+def test_native_programs_bypass_proton(paths, tmp_path, monkeypatch):
+    # As Steam's default tool we also receive native shortcuts (our own UI, emulators).
+    elf = tmp_path / "deckcompanion-ui"
+    elf.write_bytes(b"\x7fELF\x02\x01rest")
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n")
+    exe = tmp_path / "game.exe"
+    exe.write_bytes(b"MZ\x90\x00")
+    calls = []
+    monkeypatch.setattr(launch.os, "execv", lambda path, args: calls.append((path, args)))
+    monkeypatch.setattr(launch, "prepare", lambda *a: (_ for _ in ()).throw(AssertionError("Proton used")))
+    launch.launch(paths, "waitforexitandrun", [str(elf), "--flag"])
+    launch.launch(paths, "run", [str(script)])
+    launch.launch(paths, "getcompatpath", [str(elf)])
+    assert calls == [(str(elf), [str(elf), "--flag"]), (str(script), [str(script)])]
+    assert launch.native([str(exe)]) is False and launch.native([]) is False
