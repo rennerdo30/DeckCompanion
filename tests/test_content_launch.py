@@ -222,7 +222,7 @@ def test_first_launch_defers_content_and_exec_failure_marks_status(paths, tmp_pa
     args, _ = launch.prepare(paths, "run", ["game.exe"], env)
     assert not prefix.exists()
     assert "Content root does not exist" in (paths.data / "logs/42-last.log").read_text()
-    monkeypatch.setattr(launch, "prepare", lambda *a: (args, env))
+    monkeypatch.setattr(launch, "prepare", lambda *a, **kw: (args, env))
     monkeypatch.setattr(launch.os, "execve", lambda *a: (_ for _ in ()).throw(OSError("not executable")))
     with pytest.raises(OSError):
         launch.launch(paths, "run", ["game.exe"])

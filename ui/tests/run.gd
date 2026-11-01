@@ -78,9 +78,13 @@ func run() -> void:
 	check(not backend.busy,"async completion releases busy state")
 	var ui: Node = load("res://main.tscn").instantiate()
 	root.add_child(ui)
-	await create_timer(0.5).timeout
+	# Startup reads games, status and persisted splash settings sequentially.
+	await create_timer(0.7).timeout
 	check(ui.games.size() == 4,"main scene loads fixture library asynchronously")
 	await ui_032(ui)
+	await ui_034(ui)
+	await settings_checks(ui)
+	await touch_checks(ui)
 	# Steam Input's virtual gamepad on the Deck is not device 0.
 	for spec in [[JOY_BUTTON_A,"ui_accept"],[JOY_BUTTON_B,"ui_cancel"],[JOY_BUTTON_X,"dc_x"],[JOY_BUTTON_DPAD_DOWN,"ui_down"]]:
 		var press := InputEventJoypadButton.new()
@@ -148,6 +152,238 @@ func control(ui: Node, id: String) -> Control:
 	for item in ui.controls:
 		if item.get_meta("focus_id", "") == id: return item
 	return null
+
+func ui_034(ui: Node) -> void:
+	ui._switch_tab(2)
+	var toggle: Control = control(ui,"splash_toggle")
+	check(toggle != null,"Settings screen has launch splash card")
+	if toggle != null:
+		check(toggle.text.ends_with(": On"),"splash defaults on in UI")
+		toggle.pressed.emit()
+		await create_timer(0.25).timeout
+		check(not ui.settings.splash and control(ui,"splash_toggle").text.ends_with(": Off"),"splash toggle saves and refreshes card")
+		control(ui,"splash_more").pressed.emit()
+		await create_timer(0.25).timeout
+		check(ui.settings.splash_seconds == 3 and not ui.settings.splash,"duration saves without losing toggle")
+		ui._request("settings")
+		await create_timer(0.25).timeout
+		check(ui.settings == ui.backend.mock_response("settings"),"settings round-trip via mock backend")
+		for seconds in [1,6]:
+			ui._request("settings",["--splash-seconds",str(seconds)])
+			await create_timer(0.25).timeout
+			check(control(ui,"splash_less" if seconds == 1 else "splash_more") == null,"duration stops at bound " + str(seconds))
+		check(not ui.notice.contains("Apply when"),"settings apply immediately without Steam restart wording")
+	check(Backend.parse_response("{}",0,"settings").has("error"),"settings schema rejects missing fields")
+	check(Backend.parse_response('{"splash":true,"splash_seconds":99}',0,"settings").has("error"),"settings schema rejects out-of-range duration")
+	var exists := FileAccess.file_exists("res://scripts/splash.gd")
+	check(exists,"standalone splash mode exists")
+	if exists:
+		var splash: Control = load("res://scripts/splash.gd").new()
+		splash.auto_quit = false
+		splash.file = "res://fixtures/splash.json"
+		root.add_child(splash)
+		await process_frame
+		await process_frame
+		check(splash.loaded and splash.title.text == "Farming Simulator 25","splash renders fixture JSON")
+		check(not has_backend(splash),"splash contains no engine backend")
+		check(splash.proton_line.text.contains("GE-Proton11-11") and splash.fixes_line.text.contains("Upstream chaining: yes"),"splash shows Proton and configured fixes")
+		check(splash.mod_rows.get_child_count() == 3 and splash.mod_rows.get_child(1).text.contains("Installed"),"splash shows installed mod state")
+		for i in 100:
+			await process_frame
+			if not splash.cache.worker: break
+		check(not splash.art.fallback,"splash artwork decodes on existing background cache")
+		check(splash.content.get_global_rect().end.y <= root.size.y,"splash content fits 1280x800")
+		if splash.content.get_global_rect().end.y > root.size.y:
+			print("Splash content rect: ",splash.content.get_global_rect())
+			for child in splash.content.get_children(): print("Child: ",child.get_class()," ",child.size," minimum ",child.get_combined_minimum_size())
+		root.size = Vector2i(1920,1080)
+		await process_frame
+		await process_frame
+		check(splash.content.get_global_rect().end.y <= root.size.y,"splash content fits docked 1920x1080")
+		root.size = Vector2i(1280,800)
+		for spec in [[1,JOY_BUTTON_A],[5,JOY_BUTTON_B]]:
+			splash.done = false
+			var press := InputEventJoypadButton.new()
+			press.device = spec[0]
+			press.button_index = spec[1]
+			press.pressed = true
+			splash._input(press)
+			check(splash.done,"splash skips from any device " + str(spec[0]))
+		splash.done = false
+		var touch := InputEventScreenTouch.new()
+		touch.pressed = true
+		splash._input(touch)
+		touch.pressed = false
+		splash._input(touch)
+		check(splash.done,"touch skips splash")
+		splash.done = false
+		splash.elapsed = splash.duration - 0.1
+		splash._process(0.2)
+		check(splash.done and splash.progress.value == 100,"duration completes progress and finishes splash")
+		var fallback: Dictionary = splash.payload.duplicate(true)
+		fallback.art = {}
+		fallback.warnings = ["Fixture mod blocked: preserving player files"]
+		fallback.mods[0].state = "blocked"
+		fallback.mods[0].state_message = "Preserving player files"
+		splash.set_payload(fallback)
+		await process_frame
+		check(splash.art.fallback and splash.warnings.visible,"missing artwork uses generated fallback with visible warnings")
+		check(splash.mod_rows.get_child(1).text.contains("Blocked"),"blocked mod is visibly labelled")
+		splash.queue_free()
+		await process_frame
+	ui._switch_tab(0)
+	ui.notice = ""
+	ui._render()
+	await process_frame
+
+func has_backend(node: Node) -> bool:
+	if node.get_script() == Backend: return true
+	for child in node.get_children():
+		if has_backend(child): return true
+	return false
+
+func settings_checks(ui: Node) -> void:
+	check(control(ui,"settings") != null,"third Settings tab exists")
+	if control(ui,"settings") == null: return
+	for spec in [[JOY_BUTTON_RIGHT_SHOULDER,1],[JOY_BUTTON_RIGHT_SHOULDER,2],[JOY_BUTTON_RIGHT_SHOULDER,0],[JOY_BUTTON_LEFT_SHOULDER,2]]:
+		var press := InputEventJoypadButton.new()
+		press.device = 4
+		press.button_index = spec[0]
+		press.pressed = true
+		ui._unhandled_input(press)
+		check(ui.tab == spec[1],"LB/RB cycles three tabs with correct direction: " + str(spec))
+	check(control(ui,"default") != null and control(ui,"splash_toggle") != null,"General contains queued default and splash controls")
+	check(ui.update_backend.active == "update" and not ui.backend.busy,"startup update uses independent background backend")
+	control(ui,"show_games_without_recipe").pressed.emit()
+	await create_timer(0.25).timeout
+	check(not ui.settings.show_games_without_recipe,"library preference round-trip")
+	ui._switch_tab(0)
+	check(control(ui,"480") == null and control(ui,"2300320") != null,"library preference hides only games with no recipe")
+	ui._switch_tab(2)
+	control(ui,"show_games_without_recipe").pressed.emit()
+	await create_timer(0.25).timeout
+	ui._switch_tab(0)
+	check(control(ui,"480") != null,"library preference restores no-recipe games")
+	ui._switch_tab(2)
+	ui._show_license(false)
+	check(ui.licenses.visible and ui.licenses.get_child(0) is ScrollContainer,"MIT opens scrollable license dialog")
+	ui.licenses.hide()
+	ui._show_license(true)
+	check(ui.licenses.get_child(0).get_child(0).text.contains("Rossen Georgiev") and ui.licenses.get_child(0).get_child(0).text.contains("Godot Engine"),"third-party dialog contains bundled and Godot notices")
+	ui.licenses.hide()
+	ui._switch_tab(1)
+	check(control(ui,"default") == null and control(ui,"splash_toggle") == null and control(ui,"check") == null,"Updates keeps status only")
+	var other: Node = load("res://main.tscn").instantiate()
+	root.add_child(other)
+	other.backend.settings.check_updates_on_start = false
+	await create_timer(0.7).timeout
+	check(other.startup_settings_read and other.update_backend.active.is_empty(),"disabled startup update makes no update request")
+	other.queue_free()
+	await process_frame
+	ui._switch_tab(0)
+
+func send_mouse(point: Vector2, pressed: bool) -> void:
+	var event := InputEventMouseButton.new()
+	event.position = point
+	event.global_position = point
+	event.button_index = MOUSE_BUTTON_LEFT
+	event.pressed = pressed
+	Input.parse_input_event(event)
+	await process_frame
+
+func move_mouse(point: Vector2, relative: Vector2) -> void:
+	var event := InputEventMouseMotion.new()
+	event.position = point
+	event.global_position = point
+	event.relative = relative
+	event.button_mask = MOUSE_BUTTON_MASK_LEFT
+	Input.parse_input_event(event)
+	await process_frame
+
+func touch_checks(ui: Node) -> void:
+	var exists := FileAccess.file_exists("res://scripts/drag_scroll.gd")
+	check(exists,"reusable drag scroller exists")
+	var script: Script = load("res://scripts/drag_scroll.gd") if exists else null
+	for tab in [0,1,2]:
+		ui._switch_tab(tab)
+		for area in ui.find_children("*","ScrollContainer",true,false): check(exists and area.get_script() == script,"tab scroll area uses shared drag helper")
+	ui._open_game(ui.games[0])
+	await create_timer(0.25).timeout
+	for area in ui.find_children("*","ScrollContainer",true,false): check(exists and area.get_script() == script,"detail and nested log use shared drag helper")
+	ui._back()
+	ui._switch_tab(0)
+	var scroll: ScrollContainer = script.new() if exists else ScrollContainer.new()
+	scroll.position = Vector2(20,20)
+	scroll.size = Vector2(320,160)
+	root.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.custom_minimum_size.x = 280
+	scroll.add_child(list)
+	var taps := [0]
+	for i in 14:
+		var button := Button.new()
+		button.text = "Touch target " + str(i)
+		button.custom_minimum_size.y = 64
+		button.pressed.connect(func(): taps[0] += 1)
+		list.add_child(button)
+	await process_frame
+	await process_frame
+	var first: Button = list.get_child(0)
+	var start := first.get_global_rect().get_center()
+	await send_mouse(start,true)
+	await move_mouse(start+Vector2(0,5),Vector2(0,5))
+	await send_mouse(start+Vector2(0,5),false)
+	check(taps[0] == 1 and scroll.scroll_vertical == 0,"tap below threshold still activates button")
+	await send_mouse(start,true)
+	await move_mouse(start-Vector2(0,80),Vector2(0,-80))
+	check(scroll.scroll_vertical > 0 and first.disabled,"mouse swipe scrolls and cancels pending button press")
+	await send_mouse(start-Vector2(0,80),false)
+	await process_frame
+	check(taps[0] == 1 and not first.disabled,"swipe release does not click and restores button")
+	var before := scroll.scroll_vertical
+	if exists: scroll._process(0.04)
+	check(scroll.scroll_vertical > before,"swipe continues with light inertia")
+	var touch := InputEventScreenTouch.new()
+	touch.index = 7
+	touch.position = Vector2(100,120)
+	touch.pressed = true
+	Input.parse_input_event(touch)
+	await process_frame
+	var drag := InputEventScreenDrag.new()
+	drag.index = 7
+	drag.position = touch.position-Vector2(0,50)
+	drag.relative = Vector2(0,-50)
+	before = scroll.scroll_vertical
+	Input.parse_input_event(drag)
+	await process_frame
+	check(scroll.scroll_vertical > before,"ScreenTouch/ScreenDrag scroll without touchscreen detection")
+	touch.pressed = false
+	touch.position = drag.position
+	Input.parse_input_event(touch)
+	await process_frame
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.physical_keycode = KEY_DOWN
+	if exists: scroll._input(key)
+	check(exists and scroll.velocity == Vector2.ZERO,"keyboard/controller navigation stops touch inertia")
+	var nested: ScrollContainer = script.new() if exists else ScrollContainer.new()
+	nested.custom_minimum_size = Vector2(260,100)
+	list.add_child(nested)
+	list.move_child(nested,0)
+	var long_text := Label.new()
+	long_text.text = "Nested log"
+	long_text.custom_minimum_size.y = 800
+	nested.add_child(long_text)
+	scroll.scroll_vertical = 0
+	await process_frame
+	await process_frame
+	start = nested.get_global_rect().get_center()
+	await send_mouse(start,true)
+	await move_mouse(start-Vector2(0,50),Vector2(0,-50))
+	check(nested.scroll_vertical > 0 and scroll.scroll_vertical == 0,"nested scroll owns swipe without moving its outer container")
+	await send_mouse(start-Vector2(0,50),false)
+	scroll.queue_free()
+	await process_frame
 
 func ui_032(ui: Node) -> void:
 	var modern := false

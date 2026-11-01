@@ -21,7 +21,7 @@ Without mock mode, `DECKCOMPANION_CLI` supplies one executable path (not a shell
 | B; Escape | Back; cancel restart dialog |
 | X; X | Cycle library filters; enable/disable in detail |
 | Y; Y | Open Apply confirmation |
-| L1 / R1; Q / E | Switch Games / Updates |
+| L1 / R1; Q / E | Cycle Games / Updates / Settings, backwards / forwards |
 | Right stick; Page Up / Page Down | Scroll library preview or launch log in detail |
 | Mouse / touch | Activate controls and scroll |
 
@@ -32,6 +32,49 @@ The library previews the focused game immediately: local artwork, fix state, sel
 Mod rows separate preference (`[On]` / `[Off]`) from content: Installed, Will install on next launch, Update available, Off, or Blocked with the engine's explanation. Older engines without `state` use `installed_version`; a preference checkmark never stands for installation. Mod toggles show `mod_result.message`, or **Saved. Takes effect on next launch.** when absent. They never add mock pending Steam changes. Enable/disable/default changes retain the Apply notice.
 
 ## Architecture
+
+Launch mode: `deckcompanion-ui --splash <UTF-8 JSON file>` routes through
+`boot.tscn` before constructing any management UI/backend. It is fullscreen and
+uses only the supplied launch summary and local artwork; no engine CLI or network
+calls. The first frame uses generated artwork; the existing image worker decodes
+hero/header/portrait while the logo loads through Godot's threaded resource loader.
+A/B on any device, Enter/Escape, touch or left click skips; duration completion and
+skip both exit 0. Bad/missing JSON exits 1 so the engine can log and continue.
+
+**Settings → General → Launch splash** saves on/off and a 1–6 second duration
+through `settings`. Focusable 0.5-second decrement/increment buttons work with the
+normal controller navigation, and the card scrolls into view. Preferences save
+immediately, without Apply/restart. The mock backend retains them for its session.
+
+Settings is the third tab. General also contains the global default-tool control,
+which still queues a change for Apply. Library can hide games without a recipe.
+Updates controls automatic checks on open (default on) and Check now; its separate
+backend keeps navigation available during the request. The Updates tab contains
+engine/index/Proton status only. About shows engine/UI versions, the install path,
+the exact uninstall command (no uninstall button), and scrollable MIT/third-party
+dialogs. `ui/legal/` copies the repository MIT and third-party/vdf notices; the
+dialog also includes Godot's runtime license texts. The export bundles those files.
+
+All management scroll areas (including nested launch logs and license dialogs) use
+`drag_scroll.gd`: native touch or left-held mouse motion, a 12 px threshold, deferred
+button cancellation and light inertia. Taps keep their normal button action.
+Nested scroll areas own their gesture exclusively; keyboard/controller input stops
+inertia, while focus-follow and right-stick scrolling retain their usual behavior.
+Splash details use the same helper; a tap skips and a swipe scrolls the summary.
+
+Splash fixture capture (run offscreen with the window positioned outside the desktop):
+
+```powershell
+E:/Development/_cache/godot/4.7.2/Godot_v4.7.2-stable_win64.exe --path ui --resolution 1280x800 --position -32000,-32000 --max-fps 30 -- --splash res://fixtures/splash.json --splash-capture=<absolute-repo>/ui/docs/screenshots/splash.png
+```
+
+The capture switch keeps this fixture run windowed; normal launch mode is fullscreen.
+`ui/tests/run.gd` covers fixture rendering, artwork/fallback, warnings, mod states,
+skip/duration, both viewport sizes and settings round-trip. `ui/tests/splash_mode.gd`
+also exercises the real boot route with `-- --splash res://fixtures/splash.json` and
+lets it exit automatically. The new tests fail against archived `c88008b` (four UI
+failures for DC-18); existing UI checks remain green. The screenshot is mock artwork, not a
+Steam Deck capture. **Not verified on hardware:** splash focus, stacking and timing.
 
 - `main.tscn` / `scripts/main.gd`: responsive containers, library/detail/status screens, loading/error/empty states, restart confirmation and input hints. Base layout 1280×800; canvas scaling supports desktop windows and 1920×1080.
 - `scripts/backend.gd`: one command at a time, signal completion, JSON/shape validation and a stateful fixture backend. Production `OS.execute` runs on a worker `Thread`, never the UI thread. Linux uses `/usr/bin/timeout` with 45 seconds plus a 3-second kill grace; Windows uses the bundled process runner with a 45-second timeout. A timed-out mutation prompts a refresh rather than claiming success. Exit joins the bounded worker.

@@ -5,6 +5,8 @@ const Hints = preload("res://scripts/hints.gd")
 const ArtCache = preload("res://scripts/art_cache.gd")
 const GameArt = preload("res://scripts/game_art.gd")
 const Text = preload("res://scripts/game_text.gd")
+const DragScroll = preload("res://scripts/drag_scroll.gd")
+const UI_VERSION := "0.3.4"
 const INK := Color("e7f1f4")
 const MUTED := Color("9ab0bc")
 const MINT := Color("b8f18b")
@@ -17,6 +19,7 @@ var apply_button: Button
 var controls: Array = []
 var games: Array = []
 var status: Dictionary = {}
+var settings: Dictionary = {}
 var update: Dictionary = {}
 var selected: Dictionary = {}
 var tab := 0
@@ -41,6 +44,11 @@ var preview_scroll: ScrollContainer
 var preview_backend: Node
 var preview_note_id := ""
 var preview_notes: Dictionary = {}
+var update_backend: Node
+var startup_settings_read := false
+var licenses: AcceptDialog
+var screen_scroll: ScrollContainer
+var license_scroll: ScrollContainer
 
 func _ready() -> void:
 	_setup_actions()
@@ -50,6 +58,9 @@ func _ready() -> void:
 	backend = Backend.new()
 	add_child(backend)
 	backend.completed.connect(_completed)
+	update_backend = Backend.new()
+	add_child(update_backend)
+	update_backend.completed.connect(_update_completed)
 	# The list contract does not include notes on older engines. Read detail separately
 	# without locking navigation or rebuilding the panel while focus moves.
 	preview_backend = Backend.new()
@@ -62,6 +73,7 @@ func _ready() -> void:
 const ALL_DEVICES := -1
 
 func _setup_actions() -> void:
+	if InputMap.has_action("dc_x"): return
 	for spec in [["dc_x", KEY_X, JOY_BUTTON_X],["dc_y", KEY_Y, JOY_BUTTON_Y],["dc_left", KEY_Q, JOY_BUTTON_LEFT_SHOULDER],["dc_right", KEY_E, JOY_BUTTON_RIGHT_SHOULDER]]:
 		InputMap.add_action(spec[0])
 		var key := InputEventKey.new()
@@ -183,6 +195,12 @@ func _build_shell() -> void:
 	dialog.confirmed.connect(func(): _request("apply",["--restart-steam"]))
 	dialog.canceled.connect(_restore_modal_focus)
 	add_child(dialog)
+	licenses = AcceptDialog.new()
+	licenses.title = "Licenses"
+	licenses.min_size = Vector2i(760,520)
+	licenses.confirmed.connect(_restore_modal_focus)
+	licenses.canceled.connect(_restore_modal_focus)
+	add_child(licenses)
 
 func _restore_modal_focus() -> void:
 	if is_instance_valid(modal_focus) and modal_focus.is_visible_in_tree(): modal_focus.grab_focus()
@@ -217,7 +235,17 @@ func _completed(command: String, data: Dictionary) -> void:
 						if game.appid == selected.get("appid"): selected.merge(game,true)
 				_request("status")
 				return
-			"status": status = data
+			"status":
+				status = data
+				if settings.is_empty():
+					_request("settings")
+					return
+			"settings":
+				settings = data
+				if not failed_args.is_empty(): notice = "Settings saved. Takes effect immediately."
+				if not startup_settings_read:
+					startup_settings_read = true
+					if settings.get("check_updates_on_start",true): _check_updates()
 			"default":
 				status = data
 				notice = "Change saved. Apply when you’re ready."
@@ -242,6 +270,7 @@ func _completed(command: String, data: Dictionary) -> void:
 	_render()
 
 func _render() -> void:
+	screen_scroll = null
 	preview = null
 	preview_scroll = null
 	preview_fields.clear()
@@ -252,18 +281,20 @@ func _render() -> void:
 	controls.clear()
 	log_view = null
 	var heading := _row(body)
-	var title := _label(("Game details" if detail and not selected.is_empty() else "Your library") if tab == 0 else "System & updates",38)
+	var title := _label(("Game details" if detail and not selected.is_empty() else "Your library") if tab == 0 else ("Updates" if tab == 1 else "Settings"),38)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.add_child(title)
 	_button("Games" + ("  •" if tab == 0 else ""),func(): _switch_tab(0),heading,"games")
 	_button("Updates" + ("  •" if tab == 1 else ""),func(): _switch_tab(1),heading,"updates")
+	_button("Settings" + ("  •" if tab == 2 else ""),func(): _switch_tab(2),heading,"settings")
 	if backend.busy: body.add_child(_label("Working…  Your changes are being read safely.",18,MINT))
 	elif not error.is_empty():
 		var alert := _card(body)
 		_paragraph(alert,error,Color("ffbd9d"))
 		_button("Try again",func(): _request(failed_command,failed_args),alert,"retry")
 	elif not notice.is_empty(): body.add_child(_label(notice,18,MINT))
-	if tab == 1: _updates_screen()
+	if tab == 2: _settings_screen()
+	elif tab == 1: _updates_screen()
 	elif detail and not selected.is_empty(): _detail_screen()
 	else: _games_screen()
 	var count: int = status.get("pending",[]).size()
@@ -288,10 +319,11 @@ func _games_screen() -> void:
 	var filters := _row(body)
 	for i in 3:
 		_button((["All games","Has fix","Enabled"][i]) + ("  ✓" if filter == i else ""),_set_filter.bind(i),filters,"filter%s" % i)
-	var visible := Nav.visible_games(games,filter)
+	var library := games if settings.get("show_games_without_recipe",true) else games.filter(func(game): return game.has_recipe)
+	var visible := Nav.visible_games(library,filter)
 	var split := _row(body)
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	var scroll := ScrollContainer.new()
+	var scroll := DragScroll.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_stretch_ratio = 1.2
 	scroll.follow_focus = true
@@ -318,7 +350,7 @@ func _games_screen() -> void:
 	preview = _card(split)
 	preview.get_parent().size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	# Clip/scroll long notes and mod lists inside the panel, keeping the footer fixed.
-	preview_scroll = ScrollContainer.new()
+	preview_scroll = DragScroll.new()
 	preview_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	preview.add_child(preview_scroll)
 	var content := VBoxContainer.new()
@@ -395,7 +427,7 @@ func _detail_screen() -> void:
 	row.add_child(name_label)
 	var enabled: bool = selected.get("pending") == "enable" or (selected.get("pending") == null and selected.enabled)
 	_button("Disable" if enabled else "Enable DeckCompanion",_toggle_game,row,"toggle",selected.has_recipe)
-	var scroll := ScrollContainer.new()
+	var scroll := DragScroll.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.follow_focus = true
 	body.add_child(scroll)
@@ -418,7 +450,7 @@ func _detail_screen() -> void:
 	_paragraph(notes,str(selected.get("notes","Loading recipe notes…")))
 	var logs := _card(column)
 	logs.add_child(_label("Last launch log",23))
-	log_view = ScrollContainer.new()
+	log_view = DragScroll.new()
 	log_view.custom_minimum_size.y = 125
 	log_view.focus_mode = Control.FOCUS_ALL
 	log_view.add_theme_stylebox_override("focus",_style(Color.TRANSPARENT,MINT))
@@ -430,26 +462,98 @@ func _detail_screen() -> void:
 	log_view.add_child(log_text)
 
 func _updates_screen() -> void:
-	var scroll := ScrollContainer.new()
+	var column := _scroll_column()
+	_update_status(column)
+
+func _scroll_column() -> VBoxContainer:
+	var scroll := DragScroll.new()
+	screen_scroll = scroll
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.follow_focus = true
 	body.add_child(scroll)
 	var column := VBoxContainer.new()
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(column)
-	var defaults := _card(column)
+	return column
+
+func _settings_screen() -> void:
+	var column := _scroll_column()
+	var splash_card := _card(column)
+	splash_card.add_child(_label("General",23))
+	_paragraph(splash_card,"See your Proton build, fixes and mods before the game starts. A, B or touch skips it.")
+	var splash_enabled: bool = settings.get("splash",true)
+	_button("Launch splash: On" if splash_enabled else "Launch splash: Off",func(): _request("settings",["--splash","off" if splash_enabled else "on"]),splash_card,"splash_toggle",not settings.is_empty())
+	var duration_row := _row(splash_card)
+	var seconds: float = settings.get("splash_seconds",2.5)
+	_button("−  0.5 s",func(): _request("settings",["--splash-seconds",str(seconds-0.5)]),duration_row,"splash_less",seconds > 1 and not settings.is_empty())
+	duration_row.add_child(_label("%.1f seconds" % seconds,20,MINT))
+	_button("+  0.5 s",func(): _request("settings",["--splash-seconds",str(seconds+0.5)]),duration_row,"splash_more",seconds < 6 and not settings.is_empty())
+	var defaults := splash_card
 	defaults.add_child(_label("Default for all games",23))
 	var pending_actions: Array = status.get("pending",[]).map(func(p): return p.get("action",""))
 	var is_default: bool = status.get("default_tool",false)
 	if pending_actions.has("default_on"): is_default = true
 	elif pending_actions.has("default_off"): is_default = false
-	_paragraph(defaults,"Every Windows game without its own setting runs through DeckCompanion and uses the newest installed Proton. Games with a recipe get their fixes and mods." if is_default else "Only games you enable here run through DeckCompanion. Other games keep Steam’s own Proton choice.")
+	_paragraph(defaults,"Use DeckCompanion for Windows games without their own Steam compatibility setting; Apply restarts Steam.")
 	_button("Stop using as default" if is_default else "Use DeckCompanion for all games",func(): _request("default",["--off" if is_default else "--on"]),defaults,"default")
+	var library := _card(column)
+	library.add_child(_label("Library",23))
+	_setting_toggle(library,"show_games_without_recipe","Show games without a recipe","Keep every installed game visible, including games with no DeckCompanion recipe.")
+	var updates := _card(column)
+	updates.add_child(_label("Updates",23))
+	_setting_toggle(updates,"check_updates_on_start","Check when DeckCompanion opens","Check the engine and recipe index in the background when the UI opens.")
+	_button("Checking…" if update_backend.busy else "Check now",_check_updates,updates,"check",not update_backend.busy)
+	var about := _card(column)
+	about.add_child(_label("About",23))
+	_paragraph(about,"Engine %s  ·  UI %s\nInstall path: %s" % [status.get("version","Not connected"),UI_VERSION,status.get("install_path","Not reported by engine")])
+	_paragraph(about,"Close Steam, then run this command to uninstall DeckCompanion. Your data is preserved.")
+	var path: String = str(status.get("install_path","~/.local/share/deckcompanion")).path_join("bin/deckcompanion")
+	var command := _label("'%s' uninstall --json" % path.replace("'","'\\''"),17,MINT)
+	command.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	about.add_child(command)
+	_button("MIT license",_show_license.bind(false),about,"license")
+	_button("Third-party notices",_show_license.bind(true),about,"notices")
+
+func _setting_toggle(parent: Node, key: String, title: String, explanation: String) -> void:
+	_paragraph(parent,explanation)
+	var enabled: bool = settings.get(key,true)
+	_button(title + (": On" if enabled else ": Off"),func(): _request("settings",["--set",key+"="+str(not enabled).to_lower()]),parent,key,not settings.is_empty())
+
+func _check_updates() -> void:
+	if not update_backend.busy: update_backend.request("update")
+
+func _update_completed(_command: String, data: Dictionary) -> void:
+	if data.has("error"): notice = "Update check: " + str(data.error.message)
+	else:
+		update = data
+		notice = "Update check complete."
+	if tab != 0: _render()
+
+func _show_license(third_party: bool) -> void:
+	for child in licenses.get_children():
+		if child is ScrollContainer: licenses.remove_child(child); child.queue_free()
+	var scroll := DragScroll.new()
+	license_scroll = scroll
+	scroll.custom_minimum_size = Vector2(700,420)
+	licenses.add_child(scroll)
+	var text := RichTextLabel.new()
+	text.fit_content = true
+	text.scroll_active = false
+	text.selection_enabled = true
+	text.custom_minimum_size.x = 680
+	text.text = FileAccess.get_file_as_string("res://legal/notices.txt" if third_party else "res://legal/mit.txt")
+	if third_party: text.text += "\n\nGodot Engine\n" + Engine.get_license_text() + "\n\n" + JSON.stringify(Engine.get_license_info(),"  ")
+	scroll.add_child(text)
+	licenses.title = "Third-party notices" if third_party else "MIT license"
+	modal_focus = get_viewport().gui_get_focus_owner()
+	licenses.popup_centered()
+	licenses.get_ok_button().grab_focus()
+
+func _update_status(column: Node) -> void:
 	var engine := _card(column)
 	engine.add_child(_label("Engine  /  " + str(status.get("version","Not connected")),26))
 	var available: String = str(update.get("engine",{}).get("available","Not checked"))
 	_paragraph(engine,"Available version: " + available + "   ·   Steam " + ("is running" if status.get("steam_running",false) else "is not running"))
-	_button("Check for updates",func(): _request("update"),engine,"check")
 	var index := _card(column)
 	index.add_child(_label("Recipe index",23))
 	var raw_fetched = update.get("index",{}).get("fetched_at")
@@ -481,7 +585,7 @@ func _switch_tab(value: int) -> void:
 	if backend.busy: return
 	tab = value
 	detail = false
-	last_focus = "updates" if value == 1 else "games"
+	last_focus = ["games","updates","settings"][value]
 	_render()
 
 func _back() -> void:
@@ -489,7 +593,7 @@ func _back() -> void:
 	if detail:
 		detail = false
 		last_focus = selected.get("appid","")
-	elif tab == 1: tab = 0
+	elif tab != 0: tab = 0
 	_render()
 
 func _input(event: InputEvent) -> void:
@@ -500,9 +604,9 @@ func _input(event: InputEvent) -> void:
 		hints.queue_redraw()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if dialog.visible or backend.busy: return
+	if dialog.visible or licenses.visible or backend.busy: return
 	if event.is_action_pressed("ui_cancel"): _back()
-	elif event.is_action_pressed("dc_left") or event.is_action_pressed("dc_right"): _switch_tab(Nav.next_index(tab,1,2))
+	elif event.is_action_pressed("dc_left") or event.is_action_pressed("dc_right"): _switch_tab(Nav.next_index(tab,-1 if event.is_action_pressed("dc_left") else 1,3))
 	elif event.is_action_pressed("dc_x"):
 		if detail: _toggle_game()
 		elif tab == 0: _set_filter(Nav.next_index(filter,1,3))
@@ -511,7 +615,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 func _process(delta: float) -> void:
-	var scroll: ScrollContainer = log_view if detail else preview_scroll
+	var scroll: ScrollContainer = license_scroll if licenses.visible else (log_view if detail else (screen_scroll if tab != 0 else preview_scroll))
 	if is_instance_valid(scroll) and not dialog.visible:
 		var axis := 0.0
 		for device in Input.get_connected_joypads():
@@ -527,7 +631,7 @@ func _capture_if_requested() -> void:
 		if arg.begins_with("--capture-dir="): directory = arg.trim_prefix("--capture-dir=")
 	if directory.is_empty() or not backend.mock: return
 	DirAccess.make_dir_recursive_absolute(directory)
-	for screen in ["games","detail","updates"]:
+	for screen in ["games","detail","updates","settings"]:
 		if screen == "games":
 			await get_tree().create_timer(0.6).timeout
 			for control in controls:
@@ -536,6 +640,7 @@ func _capture_if_requested() -> void:
 		if screen == "updates":
 			_switch_tab(1)
 			_request("update")
+		if screen == "settings": _switch_tab(2)
 		await get_tree().create_timer(1.0).timeout
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png(directory.path_join(screen+".png"))

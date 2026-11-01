@@ -5,8 +5,8 @@ import shutil
 import tempfile
 import tarfile
 import sys
-from . import archives, content, localfix, net, recipes, steam
-from .common import Error, atomic, app_id, component, locked, now, save_state, state
+from . import archives, content, localfix, net, recipes, splash, steam
+from .common import Error, atomic, app_id, component, locked, now, read_json, save_state, state
 
 
 def select_proton(available, recipe):
@@ -58,7 +58,7 @@ def resolve_proton(paths, recipe, budget, log):
     raise Error("no_proton", "No installed Proton available; install GE-Proton or Valve Proton in Steam")
 
 
-def prepare(paths, verb, command, env=None):
+def prepare(paths, verb, command, env=None, splash_info=None):
     env = dict(os.environ if env is None else env)
     if not command:
         raise Error("invalid_arguments", "launch requires a Proton verb and command")
@@ -68,7 +68,7 @@ def prepare(paths, verb, command, env=None):
     logging_ok = True
     def log(message):
         nonlocal logging_ok
-        if message.startswith(("Mod ", "Setting ", "Optional content skipped:")):
+        if message.startswith(("Mod ", "Setting ", "Optional content skipped:", "Engine preparation skipped:", "Pinned Proton unavailable:")):
             warnings.append(message)
         try:
             log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -89,6 +89,10 @@ def prepare(paths, verb, command, env=None):
     proton = Path(available[0]["path"]) if available else None
     original_env = dict(env)
     args = None
+    recipe, saved, entry = {}, {}, {}
+    prefix, game = None, None
+    chain_ready = False
+    ident = None
     try:
         ident = app_id(raw_ident)
         with locked(paths):
@@ -100,14 +104,19 @@ def prepare(paths, verb, command, env=None):
             proton = resolve_proton(paths, recipe, budget, log)
             prefix_raw = env.get("STEAM_COMPAT_DATA_PATH")
             prefix = Path(prefix_raw).resolve() if prefix_raw else None
-            game_raw = steam.installed(paths).get(ident, {}).get("path")
+            entry = steam.installed(paths).get(ident, {})
+            game_raw = entry.get("path")
             game = Path(game_raw) if game_raw else None
             active = saved.get("enabled", True)
             optional_ok = True
             if active:
                 saved["mod_status"] = {}
+                def generate_fix():
+                    nonlocal chain_ready
+                    localfix.generate(paths, ident, recipe)
+                    chain_ready = True
                 for operation in (
-                    lambda: localfix.generate(paths, ident, recipe),
+                    generate_fix,
                     lambda: saved.update(installed_mods=content.reconcile(paths, ident, recipe, prefix, game, saved.get("mods", {}), budget, log, saved["mod_status"])),
                     lambda: content.settings(recipe, prefix, game, log),
                 ):
@@ -137,6 +146,30 @@ def prepare(paths, verb, command, env=None):
         raise Error("no_proton", message)
     env.setdefault("STEAM_COMPAT_CLIENT_INSTALL_PATH", str(paths.steam))
     log(f"Handing off to {proton.name}; game result not observed")
+    if splash_info is not None and ident is not None:
+        try:
+            manifest = read_json(paths.data / "manifests" / f"{raw_ident}.json", {"mods": {}})
+            mods = []
+            for mod in recipe.get("mods", []):
+                enabled = saved.get("mods", {}).get(mod["id"], mod.get("enabled", True))
+                status, message = content.mod_state(mod, enabled, manifest["mods"].get(mod["id"]),
+                    saved.get("mod_status", {}).get(mod["id"]), prefix, game)
+                mods.append({"id": mod["id"], "name": mod["name"], "version": mod["version"],
+                             "enabled": enabled, "state": status, "state_message": message,
+                             "installed_version": saved.get("installed_mods", {}).get(mod["id"])})
+            wine = recipe.get("wine", {}) if chain_ready else {}
+            steps = ["Winetricks: " + step for step in wine.get("winetricks", [])]
+            steps += ["Registry: " + step["key"] + " / " + step["name"] for step in wine.get("registry", [])]
+            steps += ["DLL: " + key + " = " + value for key, value in wine.get("dll_overrides", {}).items()]
+            steps += ["Environment: " + key for key in wine.get("env", {})]
+            pin = recipe.get("runtime", {}).get("proton", "GE-Proton")
+            splash_info.update(appid=raw_ident, name=(entry or recipe).get("name", raw_ident),
+                art=steam.artwork(paths, raw_ident), recipe_version=recipe.get("version"),
+                proton={"name": proton.name, "reason": "pinned" if recipe and proton.name == pin else "recipe_fallback" if recipe else "newest"},
+                fixes={"upstream_chained": chain_ready, "wine_steps_count": len(steps), "wine_steps": steps},
+                mods=mods, warnings=list(warnings))
+        except Exception as exc:
+            splash.log(paths, raw_ident, f"summary unavailable: {exc}")
     return args or [str(proton / "proton"), verb, *command], env
 
 
@@ -160,7 +193,13 @@ def launch(paths, verb, command):
             return  # Prefix queries such as getcompatpath mean nothing for a native program.
         os.execv(command[0], command)
         return
-    args, env = prepare(paths, verb, command)
+    info = {}
+    args, env = prepare(paths, verb, command, splash_info=info)
+    if verb in ("run", "waitforexitandrun") and info:
+        try:
+            splash.show(paths, info, env)
+        except Exception as exc:
+            splash.log(paths, info.get("appid"), f"{exc}; continuing launch")
     try:
         os.execve(args[0], args, env)
     except OSError:

@@ -1,0 +1,11 @@
+{
+  "appid": "2300320",
+  "name": "Farming Simulator 25",
+  "art": {"hero": "res://fixtures/art/fields.png", "header": null, "portrait": null, "logo": null},
+  "proton": {"name": "GE-Proton11-11", "reason": "pinned"},
+  "recipe_version": "1.0.0",
+  "fixes": {"upstream_chained": true, "wine_steps_count": 1, "wine_steps": ["Winetricks: win10"]},
+  "mods": [{"id": "FS25_DeckMode", "name": "FS25 Deck Mode", "version": "0.7.0", "installed_version": "0.7.0", "enabled": true, "state": "installed", "state_message": "Ready for this launch"}],
+  "warnings": [],
+  "duration_seconds": 2.5
+}

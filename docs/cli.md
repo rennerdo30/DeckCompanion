@@ -37,11 +37,28 @@ contract too. `--help` is the human help exception. No progress messages on stdo
   Writes recheck Steam and back up originals. Never kill detected Steam processes.
   An empty queue returns `{"applied":[],"steam_restarted":false}` without scheduling
   a helper or restarting Steam, including with `--restart-steam`.
-- `status --json` -> `{"version":"0.3.2","steam_running":false,"default_tool":false,"pending":[],"proton":[{"name":"GE-Proton11-11","path":"..."}],"last_apply":null}`.
+- `status --json` -> `{"version":"0.3.4","install_path":"/home/deck/.local/share/deckcompanion","steam_running":false,"default_tool":false,"pending":[],"proton":[{"name":"GE-Proton11-11","path":"..."}],"last_apply":null}`.
   `default_tool` reflects the current on-disk global mapping, even while a change
   is queued. `pending` retains game entries and adds `{"action":"default_on"}`
   or `{"action":"default_off"}` without an appid for a queued global change.
   `last_apply` is null before a helper run, then the content of `logs/apply-last.json`.
+
+- `settings --json` -> `{"splash":true,"splash_seconds":2.5,"show_games_without_recipe":true,"check_updates_on_start":true}`.
+  Returns all persisted settings plus defaults; reading does not write the state file.
+  `settings --set key=value [--set key=value ...] --json` validates all entries before
+  saving. Boolean keys `splash`, `show_games_without_recipe` and
+  `check_updates_on_start` accept true/false or on/off; all default on. Numeric
+  `splash_seconds` defaults to 2.5 and clamps finite numbers to 1–6. Unknown keys,
+  malformed entries, invalid booleans and nonfinite numbers fail without partial writes.
+  `settings --splash on|off --splash-seconds N --json` updates either or both values
+  under `settings` in state, preserving other settings and game data. Defaults are
+  on and 2.5 seconds; finite durations clamp to 1–6 seconds. Changes take effect on
+  the next game launch and need no Steam restart. Nonfinite values are rejected.
+  Splash flags are aliases and take precedence over `--set` for the same key.
+  Library visibility and automatic update checks are UI preferences; the UI runs
+  `update` on an independent background worker once on open when enabled. Global
+  default-tool selection retains its separate `default --on|--off` / Apply contract.
+  `status.install_path` identifies the data/install root for the Settings About card.
 
 ## Detached Linux apply
 
@@ -207,6 +224,35 @@ Symlinked Documents directories outside the prefix are refused and logged.
 Content warnings also appear in `game APPID --json`'s `notes`, including the mod,
 requested path, resolved destination and containment reason. `log_tail` retains
 the same launch message; immediate warnings are kept in `notes` and mod state.
+
+## Launch splash (0.3.4)
+
+After preparation, `run` and `waitforexitandrun` launch the installed UI as
+`<data>/bin/deckcompanion-ui --splash <temporary-json-file>` before execve into
+Proton. `DECKCOMPANION_UI` overrides this with one executable path (a bare name
+may resolve on PATH); no shell command is evaluated. The file is closed before
+spawning and removed after the UI exits. Native ELF/script passthrough runs first,
+so the management UI's own Steam shortcut and other native programs never get a
+splash. Other Proton verbs do not show it. Off skips the subprocess entirely.
+
+The engine records its child PID, waits at most the configured duration + 2 seconds,
+then kills only that child if needed (up to 2 seconds to reap). Missing executables,
+no display, crashes, timeout, corrupt settings and payload errors are logged to the
+game's existing launch log; the same prepared Proton arguments/environment still
+reach execve. Logging failure falls back to stderr. No display on Linux skips the UI.
+
+The UTF-8 JSON contains `name`, `appid`, `art` (the same local paths as GAME),
+`proton: {name, reason}` for the actual selected runtime, `recipe_version`,
+`fixes: {upstream_chained, wine_steps_count, wine_steps}`, `mods` with metadata,
+preference/installed version and `state`/`state_message`, `warnings`, and
+`duration_seconds`. `upstream_chained` means our managed localfix was successfully
+generated with upstream chaining; it does not assert that Proton has executed it
+or that this game has a bundled upstream fix. Wine steps describe configured
+Winetricks, registry, DLL and environment work; once-only steps may already have
+run on an earlier launch. Failed/disabled localfix generation reports no chain and
+zero Wine steps. This is a preparation summary, not a game-success receipt.
+
+Not verified on hardware: Game Mode focus, gamescope window stacking and timing.
 
 ## Update and rollback (slice 3a)
 

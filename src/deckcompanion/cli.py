@@ -2,6 +2,7 @@
 import argparse
 from collections import deque
 import json
+import math
 import sys
 from . import __version__, content, recipes, steam
 from .common import Error, Paths, app_id, locked, read_json, state, save_state
@@ -40,7 +41,7 @@ def parser():
     root = Parser(prog="deckcompanion")
     root.add_argument("--json", action="store_true")
     commands = root.add_subparsers(dest="command", required=True)
-    for name in ("games", "game", "enable", "disable", "mod", "default", "apply", "status", "update", "rollback"):
+    for name in ("games", "game", "enable", "disable", "mod", "default", "apply", "status", "update", "rollback", "settings"):
         sub = commands.add_parser(name)
         sub.add_argument("--json", action="store_true")
         if name in ("game", "enable", "disable", "mod"):
@@ -53,6 +54,10 @@ def parser():
             group.add_argument("--off", action="store_true")
         if name == "apply":
             sub.add_argument("--restart-steam", action="store_true")
+        if name == "settings":
+            sub.add_argument("--splash", choices=("on", "off"))
+            sub.add_argument("--splash-seconds", type=float)
+            sub.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
     launch = commands.add_parser("launch")
     launch.add_argument("--json", action="store_true")
     launch.add_argument("verb")
@@ -72,6 +77,35 @@ def parser():
 def execute(args, paths):
     name = args.command
     data = state(paths)
+    if name == "settings":
+        from .splash import DEFAULTS, settings
+        options = settings(data)
+        for setting in args.set:
+            key, separator, value = setting.partition("=")
+            if not separator or key not in DEFAULTS:
+                raise Error("invalid_arguments", "Unknown setting; expected a documented key=value")
+            if key == "splash_seconds":
+                try:
+                    number = float(value)
+                except ValueError as exc:
+                    raise Error("invalid_arguments", "Splash duration must be a finite number") from exc
+                if not math.isfinite(number):
+                    raise Error("invalid_arguments", "Splash duration must be a finite number")
+                options[key] = max(1.0, min(6.0, number))
+            else:
+                if value.lower() not in ("true", "false", "on", "off"):
+                    raise Error("invalid_arguments", "Boolean settings accept true/false or on/off")
+                options[key] = value.lower() in ("true", "on")
+        if args.splash is not None:
+            options["splash"] = args.splash == "on"
+        if args.splash_seconds is not None:
+            if not math.isfinite(args.splash_seconds):
+                raise Error("invalid_arguments", "Splash duration must be a finite number")
+            options["splash_seconds"] = max(1.0, min(6.0, args.splash_seconds))
+        if args.splash is not None or args.splash_seconds is not None or args.set:
+            data.setdefault("settings", {}).update(options)
+            save_state(paths, data)
+        return options
     if name in ("install", "uninstall"):
         from . import install
         return install.install(paths, args.source) if name == "install" else install.uninstall(paths)
@@ -121,7 +155,7 @@ def execute(args, paths):
         pending = [{"appid": ident, "action": item["pending"]} for ident, item in data["games"].items() if item.get("pending")]
         if data.get("default_pending"):
             pending.append({"action": data["default_pending"]})
-        return {"version": __version__, "steam_running": steam.running(),
+        return {"version": __version__, "install_path": str(paths.data), "steam_running": steam.running(),
                 "default_tool": steam.mappings(steam.read_vdf(steam.mapping_path(paths))).get("0", {}).get("name") == "DeckCompanion",
                 "pending": pending,
                 "proton": steam.proton(paths),
