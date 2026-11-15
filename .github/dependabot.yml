@@ -1,48 +1,30 @@
 # Dependabot configuration.
 #
-# Weekly. Minor and patch updates are grouped into one pull request per
-# ecosystem so version-locked pairs can never be split across PRs; major
-# updates arrive individually so each gets evaluated on its own. The Astro
-# docs stack is grouped across all update types because its packages carry
-# hard peer ranges on each other. GitHub Actions and container images are
-# grouped across all update types. A short cooldown skips releases that are
-# only hours old. Security updates are grouped per ecosystem.
+# Every version update across all ecosystems lands in ONE pull request per
+# week (a multi-ecosystem group), so the review queue never holds more than
+# one dependency PR. A short cooldown skips releases that are only hours old.
+# Security updates are not delayed and arrive as soon as an advisory matches.
 version: 2
+
+multi-ecosystem-groups:
+  weekly-dependencies:
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "deps"
 
 updates:
   - package-ecosystem: "npm"
     directory: "/decky-plugin"
-    schedule:
-      interval: "weekly"
-      day: "monday"
+    patterns: ["*"]
+    multi-ecosystem-group: "weekly-dependencies"
     cooldown:
       default-days: 3
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "deps(npm):"
-    groups:
-      npm-minor-patch:
-        applies-to: version-updates
-        patterns: ["*"]
-        update-types: ["minor", "patch"]
-      npm-security:
-        applies-to: security-updates
-        patterns: ["*"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
+    patterns: ["*"]
+    multi-ecosystem-group: "weekly-dependencies"
     cooldown:
       default-days: 3
-    open-pull-requests-limit: 3
-    commit-message:
-      prefix: "deps(actions):"
-    groups:
-      actions-all:
-        applies-to: version-updates
-        patterns: ["*"]
-      actions-security:
-        applies-to: security-updates
-        patterns: ["*"]
